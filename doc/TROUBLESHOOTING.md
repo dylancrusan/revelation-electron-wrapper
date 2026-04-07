@@ -27,6 +27,28 @@ On some Ubuntu/Wayland setups, Electron rendering works more reliably when force
 revelation-electron --ozone-platform=x11
 ```
 
+### GPU errors on X11 (missing background video, GPU process crash)
+
+If you see GPU errors like `gbm_bo_import` returning nullptr or `GPU process exited unexpectedly` in the console, the GPU driver is failing to share buffers with Chromium under XWayland. This also causes background videos in presentations to disappear.
+
+Pass one of the following additional flags, from least to most aggressive:
+
+```bash
+# Option 1: Disable GPU sandbox only (least invasive)
+revelation-electron --ozone-platform=x11 --disable-gpu-sandbox
+
+# Option 2: Software GL renderer — bypasses GBM entirely (recommended)
+revelation-electron --ozone-platform=x11 --use-gl=swiftshader
+
+# Option 3: Disable GPU compositing
+revelation-electron --ozone-platform=x11 --disable-gpu-compositing
+
+# Option 4: Disable GPU entirely (most stable, no hardware acceleration)
+revelation-electron --ozone-platform=x11 --disable-gpu
+```
+
+`--use-gl=swiftshader` (option 2) is the recommended starting point — it uses CPU-based software rendering to avoid the GBM crash while keeping compositing functional, which allows background videos to display correctly.
+
 ---
 
 If you launch from the desktop, you can use a `.desktop` entry like this:
@@ -34,7 +56,7 @@ If you launch from the desktop, you can use a `.desktop` entry like this:
 ```ini
 [Desktop Entry]
 Name=REVELation Snapshot Presenter
-Exec=revelation-electron --ozone-platform=x11
+Exec=revelation-electron --ozone-platform=x11 --use-gl=swiftshader
 Terminal=false
 Type=Application
 Categories=Utility;
