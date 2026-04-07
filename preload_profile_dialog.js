@@ -2,6 +2,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('profileDialogAPI', {
-  confirm: (name) => ipcRenderer.invoke('profile-dialog:confirm', name),
+  confirm: (name, duplicate) => ipcRenderer.invoke('profile-dialog:confirm', name, duplicate),
   cancel:  ()     => ipcRenderer.invoke('profile-dialog:cancel')
 });

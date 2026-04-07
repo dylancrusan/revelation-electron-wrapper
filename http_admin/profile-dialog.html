@@ -157,6 +157,37 @@
       color: #7faa98;
       cursor: not-allowed;
     }
+    .radio-group {
+      margin: 16px 0 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 14px;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: normal;
+      cursor: pointer;
+      margin: 0;
+    }
+    .radio-group input[type="radio"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .radio-group .radio-desc {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 25px;
+      margin-top: -4px;
+    }
   </style>
 </head>
 <body>
@@ -167,11 +198,23 @@
   <main class="wrap">
     <section class="panel">
       <h1>Save as New Profile</h1>
-      <p class="sub">The current settings will be saved as a new profile and the app will switch to it.</p>
+      <p class="sub">Create a new settings profile and switch to it.</p>
       <label for="profileName">Profile name</label>
       <input id="profileName" type="text" maxlength="50" placeholder="e.g. Sunday Service" autocomplete="off" spellcheck="false" />
       <p id="errorMsg" class="error"></p>
       <p class="hint">Letters, numbers, spaces, hyphens and underscores only. Max 50 characters.</p>
+      <div class="radio-group">
+        <label>
+          <input type="radio" name="profileSource" value="duplicate" checked />
+          Duplicate current profile
+        </label>
+        <span class="radio-desc">Start with your current settings.</span>
+        <label>
+          <input type="radio" name="profileSource" value="defaults" />
+          Default settings
+        </label>
+        <span class="radio-desc">Start fresh with application defaults.</span>
+      </div>
       <div class="actions">
         <button id="cancelBtn" class="secondary" type="button">Cancel</button>
         <button id="saveBtn" class="primary" type="button">Save &amp; Switch</button>
@@ -210,8 +253,9 @@
       if (err) { errorMsg.textContent = err; return; }
       saveBtn.disabled = true;
       errorMsg.textContent = '';
+      const duplicate = document.querySelector('input[name="profileSource"]:checked')?.value === 'duplicate';
       try {
-        const result = await window.profileDialogAPI.confirm(name.trim());
+        const result = await window.profileDialogAPI.confirm(name.trim(), duplicate);
         if (result && result.error) {
           errorMsg.textContent = result.error;
           saveBtn.disabled = false;
