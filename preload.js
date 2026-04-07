@@ -198,5 +198,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('export-status', handler);
   },
   readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
-  readClipboardHTML: () => ipcRenderer.invoke('read-clipboard-html')
+  readClipboardHTML: () => ipcRenderer.invoke('read-clipboard-html'),
+  getProfiles: () => ipcRenderer.invoke('get-profiles'),
+  switchProfile: (name) => ipcRenderer.invoke('switch-profile', name)
 });

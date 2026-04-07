@@ -44,7 +44,8 @@ const { presentationWindow } = require('./lib/presentationWindow');
 const { aboutWindow } = require('./lib/aboutWindow');
 const { mainMenu } = require('./lib/mainMenu');
 const { serverManager } = require('./lib/serverManager');
-const { loadConfig, saveConfig, configPath } = require('./lib/configManager');
+const { loadConfig, saveConfig, listProfiles, configPath } = require('./lib/configManager');
+const { profileWindow } = require('./lib/profileWindow');
 const { settingsWindow } = require('./lib/settingsWindow');
 const { mdnsManager } = require('./lib/mdnsManager');
 const { peerPairingWindow } = require('./lib/peerPairingWindow');
@@ -172,6 +173,7 @@ AppContext.applyZoomFactorToAllWindows = (zoomFactor) => {
 const hadConfigAtStartup = fs.existsSync(configPath);
 AppContext.config = loadConfig();
 AppContext.config.zoomFactor = normalizeZoomFactor(AppContext.config.zoomFactor, 1);
+AppContext.profileList = listProfiles();
 const cliArgs = Array.isArray(process.argv) ? process.argv : [];
 const runtimeDevToolsEnabled = cliArgs.includes(RUNTIME_DEVTOOLS_FLAG)
   || app.commandLine.hasSwitch('enable-devtools');
@@ -209,6 +211,7 @@ mediaLibrary.register(ipcMain, AppContext);
 pluginDirector.register(ipcMain, AppContext);
 exportWindow.register(ipcMain, AppContext);
 presentationBuilderWindow.register(ipcMain, AppContext);
+profileWindow.register(ipcMain, AppContext);
 
 
 AppContext.callbacks['menu:switch-mode'] = (mode) => {

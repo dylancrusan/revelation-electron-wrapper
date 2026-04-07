@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Save as New Profile</title>
+  <style>
+    :root {
+      --bg-a: #0c162a;
+      --bg-b: #132743;
+      --panel: rgba(8, 14, 24, 0.72);
+      --text: #f0f5ff;
+      --muted: #afbdd8;
+      --accent: #3ac59d;
+      --accent-strong: #2ba884;
+      --stroke: rgba(134, 163, 219, 0.25);
+      --danger: #c94040;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(1200px 560px at 20% 10%, #1d3e6f, transparent 50%),
+                  radial-gradient(980px 520px at 90% 90%, #223d5f, transparent 45%),
+                  linear-gradient(145deg, var(--bg-a), var(--bg-b));
+      overflow: hidden;
+    }
+    .titlebar {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+    .titlebar .brand {
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      color: #d8e4ff;
+      opacity: 0.9;
+    }
+    .titlebar .close-btn {
+      -webkit-app-region: no-drag;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid rgba(160, 184, 220, 0.3);
+      background: rgba(12, 24, 43, 0.7);
+      color: #d6e4ff;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .titlebar .close-btn:hover {
+      background: rgba(155, 48, 48, 0.85);
+      border-color: rgba(214, 123, 123, 0.7);
+    }
+    .wrap {
+      height: calc(100% - 38px);
+      padding: 20px;
+      display: grid;
+      place-items: center;
+    }
+    .panel {
+      width: min(480px, 100%);
+      border: 1px solid var(--stroke);
+      border-radius: 18px;
+      background: var(--panel);
+      backdrop-filter: blur(4px);
+      padding: 28px 30px;
+      box-shadow: 0 12px 50px rgba(5, 10, 18, 0.5);
+      animation: rise 220ms ease-out;
+    }
+    @keyframes rise {
+      from { transform: translateY(6px); opacity: 0.4; }
+      to   { transform: translateY(0);   opacity: 1; }
+    }
+    h1 {
+      margin: 0 0 6px 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+    .sub {
+      margin: 0 0 20px 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: #c7d5ef;
+      margin-bottom: 7px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #40608f;
+      border-radius: 10px;
+      background: rgba(10, 21, 37, 0.9);
+      color: #f6fbff;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 120ms ease;
+    }
+    input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+    .error {
+      margin: 8px 0 0 0;
+      font-size: 13px;
+      color: #e07070;
+      min-height: 18px;
+    }
+    .hint {
+      margin: 8px 0 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .actions {
+      margin-top: 22px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    button {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 9px 18px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 120ms ease;
+    }
+    .secondary {
+      background: rgba(80, 110, 160, 0.25);
+      border-color: rgba(134, 163, 219, 0.3);
+      color: var(--muted);
+    }
+    .secondary:hover { background: rgba(80, 110, 160, 0.4); }
+    .primary {
+      background: var(--accent);
+      color: #03140e;
+      font-weight: 600;
+    }
+    .primary:hover { background: var(--accent-strong); }
+    .primary:disabled {
+      background: #2a6b55;
+      color: #7faa98;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">REVELation Profiles</div>
+    <button id="closeBtn" class="close-btn" type="button" aria-label="Cancel">&#x2715;</button>
+  </header>
+  <main class="wrap">
+    <section class="panel">
+      <h1>Save as New Profile</h1>
+      <p class="sub">The current settings will be saved as a new profile and the app will switch to it.</p>
+      <label for="profileName">Profile name</label>
+      <input id="profileName" type="text" maxlength="50" placeholder="e.g. Sunday Service" autocomplete="off" spellcheck="false" />
+      <p id="errorMsg" class="error"></p>
+      <p class="hint">Letters, numbers, spaces, hyphens and underscores only. Max 50 characters.</p>
+      <div class="actions">
+        <button id="cancelBtn" class="secondary" type="button">Cancel</button>
+        <button id="saveBtn" class="primary" type="button">Save &amp; Switch</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const nameInput = document.getElementById('profileName');
+    const saveBtn   = document.getElementById('saveBtn');
+    const errorMsg  = document.getElementById('errorMsg');
+
+    function validateName(value) {
+      const v = value.trim();
+      if (!v) return 'Profile name is required.';
+      if (v === 'Default') return '"Default" is reserved.';
+      if (v.length > 50) return 'Name must be 50 characters or fewer.';
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9 _-]*$/.test(v)) {
+        return 'Only letters, numbers, spaces, hyphens and underscores are allowed, starting with a letter or digit.';
+      }
+      return '';
+    }
+
+    nameInput.addEventListener('input', () => {
+      errorMsg.textContent = '';
+      saveBtn.disabled = !nameInput.value.trim();
+    });
+
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveBtn.click();
+      if (e.key === 'Escape') window.profileDialogAPI.cancel();
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const name = nameInput.value;
+      const err = validateName(name);
+      if (err) { errorMsg.textContent = err; return; }
+      saveBtn.disabled = true;
+      errorMsg.textContent = '';
+      try {
+        const result = await window.profileDialogAPI.confirm(name.trim());
+        if (result && result.error) {
+          errorMsg.textContent = result.error;
+          saveBtn.disabled = false;
+        }
+        // On success the app relaunches — no further action needed here.
+      } catch (ex) {
+        errorMsg.textContent = ex?.message || 'An error occurred.';
+        saveBtn.disabled = false;
+      }
+    });
+
+    document.getElementById('cancelBtn').addEventListener('click', () => window.profileDialogAPI.cancel());
+    document.getElementById('closeBtn').addEventListener('click', () => window.profileDialogAPI.cancel());
+
+    // Focus the input on open
+    window.addEventListener('DOMContentLoaded', () => nameInput.focus());
+    nameInput.focus();
+  </script>
+</body>
+</html>
