@@ -21,7 +21,7 @@ module.exports = {
     };
 
     // GET /api/adventisthymns/index
-    // Returns the full hymn index as JSON.
+    // Returns the full hymn index as YAML (or JSON with ?format=json).
     routes['GET /api/adventisthymns/index'] = async (_sp) => {
       const result = await callPlugin('getHymnIndex', {});
       return result.hymnIndex;
