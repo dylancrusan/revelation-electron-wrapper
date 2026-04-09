@@ -81,6 +81,7 @@ const AppContext = {
   callbacks: {},                  // Store callback functions for menu actions
   currentMode: null,              // Current server mode (localhost or LAN)
   plugins: {},                    // Collection of plugin objects
+  pluginPeerCommandHandlers: new Map(), // Handlers registered by plugins for custom peer commands
   config: {},
   forceCloseMain: false,          // flag to allow forcing main window to close (for reload)
   translations: {},               // Store translations
