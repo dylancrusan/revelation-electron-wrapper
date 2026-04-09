@@ -7,7 +7,11 @@
 function humanRefToOsis(ref) {
   // "John 3:16-18" → "John.3.16-18"
   // fetch-passage expects OSIS format with dots as separators
-  return String(ref || '').trim()
+  let s = String(ref || '').trim();
+  // If no verse specified (e.g. "Galatians 2"), request a wide range so the
+  // whole chapter is returned — same as "Galatians 2:1-200".
+  if (s && !/:/.test(s)) s += ':1-200';
+  return s
     .replace(/^(.+?)\s+(\d)/, '$1.$2')  // first space before chapter number → dot
     .replace(/:/, '.');                  // colon between chapter and verse → dot
 }
@@ -24,7 +28,7 @@ module.exports = {
         osis: humanRefToOsis(ref),
         translation: sp.get('translation') || 'KJV.local',
         includeAttribution: sp.get('attribution') !== 'false',
-        referenceSlidePosition: sp.get('refPosition') || 'end',
+        referenceSlidePosition: 'none',
         translationLanguageCode: sp.get('lang') || ''
       });
       if (!result.success) throw { status: 400, message: result.error };
