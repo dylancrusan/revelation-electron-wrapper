@@ -30,6 +30,7 @@ class RP_Shortcode
             // HTML inlined rather than an iframe/embed link.  this uses a
             // server-side markdown render so it is good for SEO.
             'inline' => '0',
+            'notes' => 'collapsed',
             'lang' => '',
             'embed' => '1',
             'width' => '100%',
@@ -80,6 +81,7 @@ class RP_Shortcode
                     'inline_base_url' => $this->current_request_url(),
                     'inline_query_param' => $this->inline_query_param_name($inline_instance_key),
                     'inline_anchor' => 'rp-inline-' . $inline_instance_key,
+                    'notes_expanded' => (string) $atts['notes'] === 'expanded',
                 ));
                 return sprintf(
                     '<div id="%1$s" class="rp-inline-wrapper" data-rp-inline-key="%2$s">%3$s</div>%4$s',

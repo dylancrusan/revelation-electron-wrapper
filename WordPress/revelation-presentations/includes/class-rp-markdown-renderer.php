@@ -42,6 +42,9 @@ class RP_Markdown_Renderer
     /** @var string */
     private $inline_anchor;
 
+    /** @var bool */
+    private $notes_expanded;
+
     public function __construct($storage, $slug, $use_slide_breaks = true, $options = array())
     {
         $this->storage = $storage;
@@ -53,6 +56,7 @@ class RP_Markdown_Renderer
         $this->inline_base_url = isset($options['inline_base_url']) ? esc_url_raw((string) $options['inline_base_url']) : '';
         $this->inline_query_param = sanitize_key(isset($options['inline_query_param']) ? (string) $options['inline_query_param'] : '');
         $this->inline_anchor = sanitize_html_class(isset($options['inline_anchor']) ? (string) $options['inline_anchor'] : '');
+        $this->notes_expanded = !empty($options['notes_expanded']);
     }
 
     /**
@@ -123,7 +127,7 @@ class RP_Markdown_Renderer
             }
             if ($clean_notes !== '') {
                 // notes are shown in a collapsible box for inline view
-                $html .= '<details class="rp-note"><summary>Notes</summary>';
+                $html .= '<details class="rp-note"' . ($this->notes_expanded ? ' open' : '') . '><summary>Notes</summary>';
                 $clean_notes = $this->transform_columns($clean_notes, $converter);
                 if ($converter) {
                     if (method_exists($converter, 'convertToHtml')) {
