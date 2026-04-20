@@ -11,6 +11,8 @@ import {
   previewFrame,
   previewSlideBtn,
   previewOverviewBtn,
+  previewPushBtn,
+  previewLinkBtn,
   slug,
   mdFile,
   dir,
@@ -30,6 +32,12 @@ let previewCcliCache = null;
 let previewCcliLoaded = false;
 let preserveEditorSelectionUntil = 0;
 let previewBridgeToken = '';
+
+// --- Peer push / link state ---
+let peerPushActive = false;
+let peerLinked = false;
+let previewPeerModeEnabled = false;
+let peerPushResolve = null;
 
 const previewBridgeDeck = {
   _indices: { h: 0, v: 0 },
@@ -179,6 +187,15 @@ function bindPreviewBridgeListener() {
       previewBridgeDeck._overview = payload.isOverview;
     }
 
+    if (eventName === 'revealRemoteReady') {
+      const multiplexId = String(payload.multiplexId || '').trim();
+      if (multiplexId && peerPushResolve) {
+        peerPushResolve(multiplexId);
+        peerPushResolve = null;
+      }
+      return;
+    }
+
     if (eventName === 'ready') {
       state.previewReady = true;
       setPreviewMode(previewBridgeDeck.isOverview());
@@ -308,6 +325,9 @@ async function updatePreview({ force = false, silent = false } = {}) {
     params.set('forceControls', '1');
     params.set('builderPreview', '1');
     params.set('builderPreviewToken', generatePreviewBridgeToken());
+    if (previewPeerModeEnabled) {
+      params.set('builderPreviewPeer', '1');
+    }
     const ccli = await getPreviewCcliNumber();
     if (ccli) {
       params.set('ccli', ccli);
@@ -373,6 +393,136 @@ function startPreviewPolling() {
   }, 250);
 }
 
+// --- Peer push / link UI ---
+function updatePeerLinkUI() {
+  if (!previewPushBtn || !previewLinkBtn) return;
+  previewLinkBtn.style.display = peerPushActive ? '' : 'none';
+  if (peerPushActive) {
+    previewLinkBtn.textContent = peerLinked ? '🔗' : '⛓️';
+    previewLinkBtn.title = peerLinked
+      ? tr('Linked to Peers — click to unlink')
+      : tr('Unlinked — click to resume peer sync');
+  }
+}
+
+function getBuilderPresentationUrl(multiplexId) {
+  const origin = window.location.origin;
+  if (!origin || !dir || !slug || !mdFile) return null;
+  const base = `${origin}/${dir}/${slug}/index.html?p=${encodeURIComponent(mdFile)}`;
+  return multiplexId ? `${base}&remoteMultiplexId=${encodeURIComponent(multiplexId)}` : base;
+}
+
+function waitForMultiplexId(timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      peerPushResolve = null;
+      reject(new Error(tr('Timed out waiting for RevealRemote to connect.')));
+    }, timeoutMs);
+    peerPushResolve = (id) => {
+      clearTimeout(timer);
+      resolve(id);
+    };
+  });
+}
+
+async function pushToPeers() {
+  if (!window.electronAPI?.sendPeerCommand) {
+    window.alert(tr('Peer commands are only available in the desktop app.'));
+    return;
+  }
+  if (!dir || !slug || !mdFile) {
+    window.alert(tr('Missing presentation metadata.'));
+    return;
+  }
+
+  try {
+    if (!previewPeerModeEnabled) {
+      previewPeerModeEnabled = true;
+      // Save current content to the temp file first, then reload the iframe
+      // directly with builderPreviewPeer=1. We can't use updatePreview() here
+      // because its "set src only when src===" guard won't fire after a reset.
+      const content = getFullMarkdown();
+      const previewLang = inferPreviewLanguage(content);
+      const previewContent = buildPreviewTempContent(content, previewLang);
+      if (window.electronAPI?.savePresentationMarkdown) {
+        await window.electronAPI.savePresentationMarkdown({
+          slug, mdFile, content: previewContent, targetFile: tempFile
+        });
+      }
+      const params = new URLSearchParams();
+      params.set('p', tempFile);
+      params.set('forceControls', '1');
+      params.set('builderPreview', '1');
+      params.set('builderPreviewToken', generatePreviewBridgeToken());
+      params.set('builderPreviewPeer', '1');
+      const ccli = await getPreviewCcliNumber();
+      if (ccli) params.set('ccli', ccli);
+      if (previewLang) params.set('lang', previewLang);
+      const peerUrl = `${getPreviewOrigin()}/${dir}/${slug}/index.html?${params.toString()}`;
+      previewFrame.src = peerUrl;
+    }
+
+    setStatus(tr('Connecting to peers…'));
+    const multiplexId = await waitForMultiplexId();
+    const url = getBuilderPresentationUrl(multiplexId);
+    await window.electronAPI.sendPeerCommand({ type: 'open-presentation', payload: { url } });
+    peerPushActive = true;
+    peerLinked = true;
+    updatePeerLinkUI();
+    setStatus(tr('Pushed to peers.'));
+  } catch (err) {
+    previewPeerModeEnabled = false;
+    window.alert(tr('Failed to push to peers: ') + err.message);
+  }
+}
+
+function togglePeerLink() {
+  if (!peerPushActive) return;
+  peerLinked = !peerLinked;
+  updatePeerLinkUI();
+  if (peerLinked) {
+    sendPreviewCommand('resumeRevealRemote');
+  } else {
+    sendPreviewCommand('pauseRevealRemote');
+  }
+}
+
+function resetPeerPushState() {
+  peerPushActive = false;
+  peerLinked = false;
+  peerPushResolve = null;
+  if (previewPeerModeEnabled) {
+    previewPeerModeEnabled = false;
+    // Rebuild the preview URL without builderPreviewPeer so RevealRemote disconnects.
+    getPreviewCcliNumber().then((ccli) => {
+      const content = getFullMarkdown();
+      const previewLang = inferPreviewLanguage(content);
+      const params = new URLSearchParams();
+      params.set('p', tempFile);
+      params.set('forceControls', '1');
+      params.set('builderPreview', '1');
+      params.set('builderPreviewToken', generatePreviewBridgeToken());
+      if (ccli) params.set('ccli', ccli);
+      if (previewLang) params.set('lang', previewLang);
+      previewFrame.src = `${getPreviewOrigin()}/${dir}/${slug}/index.html?${params.toString()}`;
+    }).catch(() => {});
+  }
+  updatePeerLinkUI();
+}
+
+function initPeerPushButtons() {
+  if (previewPushBtn) {
+    previewPushBtn.addEventListener('click', () => {
+      pushToPeers().catch((err) => console.error(err));
+    });
+  }
+  if (previewLinkBtn) {
+    previewLinkBtn.addEventListener('click', () => {
+      togglePeerLink();
+    });
+  }
+}
+
 export {
   schedulePreviewUpdate,
   cancelPreviewUpdateTimer,
@@ -382,5 +532,7 @@ export {
   PREVIEW_VIEW_BUTTON_GROUP,
   PREVIEW_VIEW_BUTTON_IDS,
   getPreviewDeck,
-  attachPreviewBridge
+  attachPreviewBridge,
+  initPeerPushButtons,
+  resetPeerPushState
 };

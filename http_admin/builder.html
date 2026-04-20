@@ -178,6 +178,8 @@
         <div class="panel-header panel-header-row">
           <span data-translate>Live Preview</span>
           <div class="panel-actions">
+            <button id="preview-push-btn" class="panel-button" title="Push to Peers" data-translate>📡</button>
+            <button id="preview-link-btn" class="panel-button" title="Linked to Peers — click to unlink" style="display:none">🔗</button>
             <button id="preview-slide-btn" class="panel-button" data-translate>Preview Slide</button>
             <button id="preview-overview-btn" class="panel-button" data-translate>Overview</button>
           </div>
@@ -185,7 +187,7 @@
         <iframe
           id="preview-frame"
           title="Presentation preview"
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-same-origin"
           referrerpolicy="no-referrer"
         ></iframe>
       </div>

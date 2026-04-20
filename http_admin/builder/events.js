@@ -149,7 +149,9 @@ import {
   schedulePreviewUpdate,
   setPreviewMode,
   PREVIEW_VIEW_BUTTON_GROUP,
-  PREVIEW_VIEW_BUTTON_IDS
+  PREVIEW_VIEW_BUTTON_IDS,
+  initPeerPushButtons,
+  resetPeerPushState
 } from './preview.js';
 import { savePresentation, loadPresentation, reparseFromFile } from './presentation.js';
 import { applyStaticLabels } from './labels.js';
@@ -594,6 +596,7 @@ function setupButtonHandlers() {
   }
 
   reparseBtn.addEventListener('click', () => {
+    resetPeerPushState();
     reparseFromFile().catch((err) => {
       console.error(err);
       setStatus(trFormat('Re-parse failed: {message}', { message: err.message }));
@@ -1048,6 +1051,7 @@ function initBuilderEvents() {
   setupSpellcheck();
   setupEditorHandlers();
   setupButtonHandlers();
+  initPeerPushButtons();
   setupStorageHandlers();
   setupCollapsiblePanels();
   setupKeyboardShortcuts();
