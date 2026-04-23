@@ -151,6 +151,7 @@ import {
   PREVIEW_VIEW_BUTTON_GROUP,
   PREVIEW_VIEW_BUTTON_IDS,
   initPeerPushButtons,
+  setPeerSaveFn,
   resetPeerPushState
 } from './preview.js';
 import { savePresentation, loadPresentation, reparseFromFile } from './presentation.js';
@@ -1051,6 +1052,7 @@ function initBuilderEvents() {
   setupSpellcheck();
   setupEditorHandlers();
   setupButtonHandlers();
+  setPeerSaveFn(() => savePresentation());
   initPeerPushButtons();
   setupStorageHandlers();
   setupCollapsiblePanels();

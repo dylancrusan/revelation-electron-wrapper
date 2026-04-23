@@ -19,7 +19,7 @@ import {
   tempFile,
   state
 } from './context.js';
-import { setStatus } from './app-state.js';
+import { setStatus, addDirtyListener } from './app-state.js';
 import { getFullMarkdown } from './document.js';
 import { extractFrontMatter, parseFrontMatterText, stringifyFrontMatter } from './markdown.js';
 import { selectSlide, setColumnMarkdownColumn, syncPreviewToEditor, goToColumn } from './slides.js';
@@ -38,6 +38,11 @@ let peerPushActive = false;
 let peerLinked = false;
 let previewPeerModeEnabled = false;
 let peerPushResolve = null;
+let _peerSaveFn = null;
+
+function setPeerSaveFn(fn) {
+  _peerSaveFn = fn;
+}
 
 const previewBridgeDeck = {
   _indices: { h: 0, v: 0 },
@@ -206,6 +211,11 @@ function bindPreviewBridgeListener() {
         });
       }
       syncPreviewToEditor();
+      // Re-apply link state after iframe reload — parent is authoritative.
+      if (peerPushActive) {
+        const cmd = peerLinked ? 'resumeRevealRemote' : 'pauseRevealRemote';
+        sendPreviewCommand(cmd);
+      }
       return;
     }
 
@@ -472,18 +482,36 @@ async function pushToPeers() {
     setStatus(tr('Pushed to peers.'));
   } catch (err) {
     previewPeerModeEnabled = false;
-    window.alert(tr('Failed to push to peers: ') + err.message);
+    console.log(tr('Failed to push to peers: ') + err.message);
   }
 }
 
-function togglePeerLink() {
-  if (!peerPushActive) return;
-  peerLinked = !peerLinked;
+function unlinkPeers() {
+  if (!peerPushActive || !peerLinked) return;
+  peerLinked = false;
   updatePeerLinkUI();
+  sendPreviewCommand('pauseRevealRemote');
+}
+
+async function togglePeerLink() {
+  if (!peerPushActive) return;
   if (peerLinked) {
-    sendPreviewCommand('resumeRevealRemote');
+    unlinkPeers();
   } else {
-    sendPreviewCommand('pauseRevealRemote');
+    if (state.dirty && _peerSaveFn) {
+      setStatus(tr('Saving before re-linking…'));
+      try {
+        await _peerSaveFn();
+      } catch (err) {
+        console.error('Peer save failed:', err);
+        setStatus(tr('Save failed — not re-linking.'));
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    peerLinked = true;
+    updatePeerLinkUI();
+    sendPreviewCommand('resumeRevealRemote');
   }
 }
 
@@ -511,6 +539,8 @@ function resetPeerPushState() {
 }
 
 function initPeerPushButtons() {
+  addDirtyListener(() => { unlinkPeers(); });
+
   if (previewPushBtn) {
     previewPushBtn.addEventListener('click', () => {
       pushToPeers().catch((err) => console.error(err));
@@ -518,7 +548,7 @@ function initPeerPushButtons() {
   }
   if (previewLinkBtn) {
     previewLinkBtn.addEventListener('click', () => {
-      togglePeerLink();
+      togglePeerLink().catch((err) => console.error(err));
     });
   }
 }
@@ -534,5 +564,6 @@ export {
   getPreviewDeck,
   attachPreviewBridge,
   initPeerPushButtons,
+  setPeerSaveFn,
   resetPeerPushState
 };

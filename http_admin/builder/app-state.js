@@ -98,7 +98,14 @@ function updateEditExternalState() {
 }
 
 // --- Dirty-state tracking ---
+const _dirtyListeners = [];
+
+function addDirtyListener(fn) {
+  if (typeof fn === 'function') _dirtyListeners.push(fn);
+}
+
 function markDirty(message = tr('Unsaved changes')) {
+  console.trace('[PeerSync:builder] markDirty called');
   state.dirty = true;
   setSaveIndicator(message);
   setSaveState(true);
@@ -109,6 +116,9 @@ function markDirty(message = tr('Unsaved changes')) {
       source: 'builder'
     });
   }
+  for (const fn of _dirtyListeners) {
+    try { fn(); } catch (e) { console.warn('dirtyListener error', e); }
+  }
 }
 
 export {
@@ -118,5 +128,6 @@ export {
   updatePresentationPropertiesState,
   updateEditExternalState,
   updateOpenFolderState,
-  markDirty
+  markDirty,
+  addDirtyListener
 };
