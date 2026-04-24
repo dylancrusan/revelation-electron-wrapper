@@ -16,6 +16,12 @@
     <div class="builder-actions">
       <button id="save-btn" class="primary"  title="Ctrl-S" data-translate>Save</button>
       <div class="builder-dropdown">
+        <button id="edit-menu-btn" type="button"><span data-translate>Edit</span> ▾</button>
+        <div id="edit-menu" class="builder-dropdown-menu" hidden>
+          <button id="edit-undo-btn" class="builder-dropdown-item" type="button">↩ <span data-translate>Undo</span> <span class="builder-shortcut">⌘Z</span></button>
+        </div>
+      </div>
+      <div class="builder-dropdown">
         <button id="add-content-btn" type="button" data-translate>Add Content ▾</button>
         <div id="add-content-menu" class="builder-dropdown-menu" hidden></div>
       </div>
@@ -41,6 +47,7 @@
   </header>
 
   <main class="builder-layout">
+    <!-- ── Left panel: slide list ─────────────────────────────────── -->
     <section class="builder-left">
       <div class="builder-panel column-panel" data-panel="columns">
         <div class="panel-header panel-header-row">
@@ -78,7 +85,7 @@
                   <button id="slide-move-up-menu-item" class="builder-dropdown-item" type="button">⬆ <span data-translate>Move Up</span></button>
                   <button id="slide-move-down-menu-item" class="builder-dropdown-item" type="button">⬇ <span data-translate>Move Down</span></button>
                   <button class="builder-dropdown-item is-disabled" type="button" disabled>✂️ <span data-translate>Break Slide (Ctrl+Enter)</span></button>
-                  <button class="builder-dropdown-item is-disabled" type="button" disabled>✂️ <span data-translate>Break Line (Shift+Enter)</span></button>                  
+                  <button class="builder-dropdown-item is-disabled" type="button" disabled>✂️ <span data-translate>Break Line (Shift+Enter)</span></button>
                 </div>
               </div>
               <button class="panel-toggle" type="button" aria-expanded="true" aria-label="Collapse slides in column" style="display: none;"></button>
@@ -99,82 +106,96 @@
         </div>
       </div>
     </section>
-    <section class="builder-middle">
-      <div class="builder-panel builder-topmatter panel-collapsible" data-panel="top-matter">
-        <details>
-          <summary class="panel-header panel-header-row">
-            <span data-translate>Top Matter</span>
-            <span class="topmatter-indicator" id="topmatter-indicator" aria-hidden="true">📌</span>
+
+    <!-- ── Col resize handle (shown when code panel visible) ─────── -->
+    <div class="col-resize-handle" id="mid-right-resize-handle" title="Drag to resize" hidden></div>
+
+    <!-- ── Middle panel: code editors (hidden by default) ────────── -->
+    <section class="builder-middle" hidden>
+      <div id="code-editors-panel">
+        <div class="builder-panel builder-topmatter panel-collapsible" data-panel="top-matter">
+          <details>
+            <summary class="panel-header panel-header-row">
+              <span data-translate>Top Matter</span>
+              <span class="topmatter-indicator" id="topmatter-indicator" aria-hidden="true">📌</span>
+              <div class="panel-actions">
+                <div class="builder-dropdown">
+                  <button id="add-top-tint-btn" class="panel-button" type="button">🎨</button>
+                  <div id="add-top-tint-menu" class="builder-dropdown-menu builder-dropdown-tint" hidden></div>
+                </div>
+                <div class="builder-dropdown">
+                  <button id="add-top-format-btn" class="panel-button" type="button">✨</button>
+                  <div id="add-top-format-menu" class="builder-dropdown-menu" hidden></div>
+                </div>
+                <div class="builder-dropdown">
+                  <button id="add-top-media-btn" class="panel-button" type="button">🎞️</button>
+                  <div id="add-top-media-menu" class="builder-dropdown-menu" hidden></div>
+                </div>
+                <button id="add-top-image-btn" class="panel-button" type="button">🖼️</button>
+                <span class="panel-chevron" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <textarea id="top-editor" spellcheck="false"></textarea>
+            </div>
+          </details>
+        </div>
+        <div class="builder-panel builder-editor panel-collapsible" data-panel="slide-markdown">
+          <div class="panel-header panel-header-row">
+            <span data-translate>Slide Markdown</span>
             <div class="panel-actions">
               <div class="builder-dropdown">
-                <button id="add-top-tint-btn" class="panel-button" type="button">🎨</button>
-                <div id="add-top-tint-menu" class="builder-dropdown-menu builder-dropdown-tint" hidden></div>
+                <button id="slide-tools-btn" class="panel-button" type="button">🔧</button>
+                <div id="slide-tools-menu" class="builder-dropdown-menu" hidden></div>
               </div>
               <div class="builder-dropdown">
-                <button id="add-top-format-btn" class="panel-button" type="button">✨</button>
-                <div id="add-top-format-menu" class="builder-dropdown-menu" hidden></div>
+                <button id="add-slide-format-btn" class="panel-button" type="button">✨</button>
+                <div id="add-slide-format-menu" class="builder-dropdown-menu" hidden></div>
               </div>
               <div class="builder-dropdown">
-                <button id="add-top-media-btn" class="panel-button" type="button">🎞️</button>
-                <div id="add-top-media-menu" class="builder-dropdown-menu" hidden></div>
+                <button id="add-slide-media-btn" class="panel-button" type="button">🎞️</button>
+                <div id="add-slide-media-menu" class="builder-dropdown-menu" hidden></div>
               </div>
-              <button id="add-top-image-btn" class="panel-button" type="button">🖼️</button>
-              <span class="panel-chevron" aria-hidden="true"></span>
+              <div class="builder-dropdown">
+                <button id="add-slide-audio-btn" class="panel-button" type="button">🎵</button>
+                <div id="add-slide-audio-menu" class="builder-dropdown-menu" hidden></div>
+              </div>
+              <button id="add-slide-image-btn" class="panel-button" type="button">🖼️</button>
+              <button class="panel-toggle" type="button" aria-expanded="true" aria-label="Collapse slide markdown"></button>
             </div>
-          </summary>
+          </div>
           <div class="panel-body">
-            <textarea id="top-editor" spellcheck="false"></textarea>
-          </div>
-        </details>
-      </div>
-      <div class="builder-panel builder-editor panel-collapsible" data-panel="slide-markdown">
-        <div class="panel-header panel-header-row">
-          <span data-translate>Slide Markdown</span>
-          <div class="panel-actions">
-            <div class="builder-dropdown">
-              <button id="slide-tools-btn" class="panel-button" type="button">🔧</button>
-              <div id="slide-tools-menu" class="builder-dropdown-menu" hidden></div>
-            </div>
-            <div class="builder-dropdown">
-              <button id="add-slide-format-btn" class="panel-button" type="button">✨</button>
-              <div id="add-slide-format-menu" class="builder-dropdown-menu" hidden></div>
-            </div>
-            <div class="builder-dropdown">
-              <button id="add-slide-media-btn" class="panel-button" type="button">🎞️</button>
-              <div id="add-slide-media-menu" class="builder-dropdown-menu" hidden></div>
-            </div>
-            <div class="builder-dropdown">
-              <button id="add-slide-audio-btn" class="panel-button" type="button">🎵</button>
-              <div id="add-slide-audio-menu" class="builder-dropdown-menu" hidden></div>
-            </div>
-            <button id="add-slide-image-btn" class="panel-button" type="button">🖼️</button>
-            <button class="panel-toggle" type="button" aria-expanded="true" aria-label="Collapse slide markdown"></button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <textarea id="slide-editor" spellcheck="true"></textarea>
-          <div id="table-picker" class="builder-table-picker" hidden>
-            <div class="builder-table-picker-title" data-translate>Insert Table</div>
-            <div id="table-picker-grid" class="builder-table-grid" role="grid" aria-label="Table size picker"></div>
-            <div id="table-picker-size" class="builder-table-picker-size">0 x 0</div>
-            <div class="builder-table-picker-actions">
-              <button id="table-picker-cancel" class="panel-button" type="button" data-translate>Cancel</button>
+            <textarea id="slide-editor" spellcheck="true"></textarea>
+            <div id="table-picker" class="builder-table-picker" hidden>
+              <div class="builder-table-picker-title" data-translate>Insert Table</div>
+              <div id="table-picker-grid" class="builder-table-grid" role="grid" aria-label="Table size picker"></div>
+              <div id="table-picker-size" class="builder-table-picker-size">0 x 0</div>
+              <div class="builder-table-picker-actions">
+                <button id="table-picker-cancel" class="panel-button" type="button" data-translate>Cancel</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </div><!-- /code-editors-panel -->
+    </section>
+
+    <!-- ── Main editing area: canvas + notes ─────────────────────── -->
+    <section class="builder-right">
+      <div id="canvas-editor-panel" class="canvas-editor-panel"></div>
+      <div class="row-resize-handle" id="canvas-notes-resize-handle"></div>
       <div class="builder-panel builder-notes panel-collapsible" data-panel="notes">
         <div class="panel-header panel-header-row">
-          <span data-translate>Notes</span>
-          <button class="panel-toggle" type="button" aria-expanded="true" aria-label="Collapse notes"></button>
+          <span data-translate>Presenter Notes</span>
+          <div class="panel-actions">
+            <button class="panel-toggle" type="button" aria-expanded="true" aria-label="Collapse notes"></button>
+          </div>
         </div>
         <div class="panel-body">
           <textarea id="notes-editor" spellcheck="true"></textarea>
         </div>
       </div>
-    </section>
-    <section class="builder-right">
-      <div class="builder-panel builder-preview">
+      <!-- Hidden preview infrastructure — kept for JS compatibility -->
+      <div class="builder-panel builder-preview" hidden>
         <div class="panel-header panel-header-row">
           <span data-translate>Live Preview</span>
           <div class="panel-actions">
@@ -184,12 +205,107 @@
             <button id="preview-overview-btn" class="panel-button" data-translate>Overview</button>
           </div>
         </div>
-        <iframe
-          id="preview-frame"
-          title="Presentation preview"
-          sandbox="allow-scripts allow-same-origin"
-          referrerpolicy="no-referrer"
-        ></iframe>
+        <div class="preview-frame-wrap">
+          <iframe
+            id="preview-frame"
+            title="Presentation preview"
+            sandbox="allow-scripts allow-same-origin"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Inspector panel ───────────────────────────────────────── -->
+    <div class="col-resize-handle" id="right-insp-resize-handle" title="Drag to resize"></div>
+    <section class="builder-inspector" id="builder-inspector">
+
+      <div class="insp-section">
+        <div class="insp-label">Background</div>
+        <div class="insp-btn-row">
+          <button class="insp-btn" id="insp-bg-btn">Image / Video</button>
+          <button class="insp-btn" id="insp-tint-btn">Gradient</button>
+        </div>
+        <button class="insp-btn insp-remove-btn" id="insp-remove-bg-btn" hidden>✕ Remove</button>
+      </div>
+      <div class="insp-section">
+        <div class="insp-label">Layout Zone</div>
+        <div class="insp-zone-grid" id="insp-zone-grid">
+          <button class="insp-zone-btn" data-zone="topleft" title="Top Left">↖</button>
+          <button class="insp-zone-btn" data-zone="upperthird" title="Upper Third">↑</button>
+          <button class="insp-zone-btn" data-zone="topright" title="Top Right">↗</button>
+          <button class="insp-zone-btn" data-zone="shiftleft" title="Left">←</button>
+          <button class="insp-zone-btn" data-zone="center" title="Center">⊙</button>
+          <button class="insp-zone-btn" data-zone="shiftright" title="Right">→</button>
+          <button class="insp-zone-btn" data-zone="bottomleft" title="Bottom Left">↙</button>
+          <button class="insp-zone-btn" data-zone="lowerthird" title="Lower Third">↓</button>
+          <button class="insp-zone-btn" data-zone="bottomright" title="Bottom Right">↘</button>
+        </div>
+      </div>
+      <div class="insp-section">
+        <div class="insp-label">Text</div>
+        <select id="insp-block-type-select" class="insp-select insp-block-type-select">
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+          <option value="h4">Heading 4</option>
+          <option value="h5">Heading 5</option>
+          <option value="p">Body</option>
+          <option value="ul">Bullet List</option>
+        </select>
+        <select id="insp-text-bg-select" class="insp-select insp-text-bg-select">
+          <option value="">No Text Background</option>
+          <option value="darkbg">Dark Text Background</option>
+          <option value="lightbg">Light Text Background</option>
+        </select>
+        <select id="insp-font-select" class="insp-select insp-font-select">
+          <option value="">Default Font</option>
+        </select>
+        <div class="insp-row">
+          <select id="insp-size-select" class="insp-select insp-size-select">
+            <option value="">Size</option>
+            <option value="5px">5</option>
+            <option value="6px">6</option>
+            <option value="7px">7</option>
+            <option value="8px">8</option>
+            <option value="9px">9</option>
+            <option value="10px">10</option>
+            <option value="11px">11</option>
+            <option value="12px">12</option>
+            <option value="13px">13</option>
+            <option value="14px">14</option>
+            <option value="16px">16</option>
+            <option value="18px">18</option>
+            <option value="20px">20</option>
+            <option value="22px">22</option>
+            <option value="24px">24</option>
+            <option value="28px">28</option>
+            <option value="32px">32</option>
+            <option value="36px">36</option>
+            <option value="40px">40</option>
+            <option value="48px">48</option>
+            <option value="56px">56</option>
+            <option value="64px">64</option>
+            <option value="72px">72</option>
+          </select>
+          <div class="builder-dropdown">
+            <button type="button" id="insp-color-btn" class="insp-color" title="Text Color"><span class="insp-color-swatch"></span></button>
+            <div id="insp-color-menu" class="builder-dropdown-menu xcp-dropdown" hidden></div>
+          </div>
+        </div>
+        <div class="insp-row">
+          <button class="insp-fmt-btn" id="insp-bold-btn" title="Bold"><b>B</b></button>
+          <button class="insp-fmt-btn" id="insp-italic-btn" title="Italic"><i>I</i></button>
+          <button class="insp-fmt-btn" id="insp-underline-btn" title="Underline"><u>U</u></button>
+          <div class="insp-sep"></div>
+          <button class="insp-align-btn" id="insp-align-left" data-align="left" title="Align Left"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+          <button class="insp-align-btn" id="insp-align-center" data-align="center" title="Align Center"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="2.5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+          <button class="insp-align-btn" id="insp-align-right" data-align="right" title="Align Right"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+          <button class="insp-align-btn" id="insp-align-justify" data-align="justify" title="Justify"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="13" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+        </div>
+      </div>
+      <div class="insp-footer">
+        <button id="show-code-btn" class="show-code-btn">Show Code ▾</button>
       </div>
     </section>
   </main>
