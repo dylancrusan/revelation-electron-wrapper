@@ -164,6 +164,123 @@ const slideSorterMediaRuntime = {
   lastFrontmatter: null
 };
 let slideSorterInitialized = false;
+
+// --- Thumbnail text overlay renderer ---
+// Renders slide body markdown as a lightweight CSS overlay on the thumbnail.
+// Much more reliable than iframes for many simultaneous thumbnails.
+
+function renderThumbTextOverlay(body, isDark, zone, textColorOverride) {
+  var rawLines = String(body || '').split(/\r?\n/);
+  var contentLines = [];
+  var inNote = false;
+  for (var i = 0; i < rawLines.length; i++) {
+    var line = rawLines[i];
+    if (/^\s*:note:\s*$/.test(line)) { inNote = true; continue; }
+    if (inNote) continue;
+    var trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^\{\{/.test(trimmed)) continue;
+    if (/^!\[/.test(trimmed)) continue;
+    if (/^:\w.*:\s*$/.test(trimmed)) continue;
+    contentLines.push(trimmed);
+  }
+  if (!contentLines.length) return null;
+
+  var textColor = textColorOverride || (isDark ? '#fff' : '#111');
+  var shadow = isDark ? '0 1px 4px rgba(0,0,0,0.95)' : '0 1px 2px rgba(255,255,255,0.8)';
+
+  // Map zone to flex positioning (mirrors layouts.scss and tweaks.js)
+  var justifyContent = 'center';
+  var alignItems = 'center';
+  var padding = '6% 8%';
+  switch (String(zone || '')) {
+    case 'upperthird':  justifyContent = 'flex-start'; break;
+    case 'lowerthird':  justifyContent = 'flex-end';   break;
+    case 'shiftright':  alignItems = 'flex-end';   padding = '6% 4% 6% 30%'; break;
+    case 'shiftleft':   alignItems = 'flex-start'; padding = '6% 30% 6% 4%'; break;
+    case 'topleft':     justifyContent = 'flex-start'; alignItems = 'flex-start'; break;
+    case 'topright':    justifyContent = 'flex-start'; alignItems = 'flex-end';   break;
+    case 'bottomleft':  justifyContent = 'flex-end';   alignItems = 'flex-start'; break;
+    case 'bottomright': justifyContent = 'flex-end';   alignItems = 'flex-end';   break;
+  }
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = [
+    'position:absolute', 'inset:0',
+    'display:flex', 'flex-direction:column',
+    'justify-content:' + justifyContent,
+    'align-items:' + alignItems,
+    'padding:' + padding, 'box-sizing:border-box',
+    'overflow:hidden', 'z-index:2', 'pointer-events:none', 'gap:1px'
+  ].join(';');
+
+  function stripInline(s) {
+    return s
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/_([^_\n]+)_/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1');
+  }
+
+  function renderLines(lines, maxCount, parentEl) {
+    var shown = 0;
+    for (var j = 0; j < lines.length && shown < maxCount; j++) {
+      var cl = lines[j];
+      if (cl === '||') continue;
+      var el = document.createElement('div');
+      var headingMatch = cl.match(/^(#{1,3})\s/);
+      if (headingMatch) {
+        var level = headingMatch[1].length;
+        var sz = level === 1 ? '10px' : level === 2 ? '9px' : '8px';
+        el.textContent = stripInline(cl.replace(/^#+\s*/, ''));
+        el.style.cssText = 'font:bold ' + sz + '/1.2 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      } else if (/^[-*+]\s/.test(cl) || /^\d+\.\s/.test(cl)) {
+        el.textContent = '• ' + stripInline(cl.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, ''));
+        el.style.cssText = 'font:7px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;';
+      } else if (/^>/.test(cl)) {
+        el.textContent = stripInline(cl.replace(/^>\s*/, ''));
+        el.style.cssText = 'font:italic 7.5px/1.3 sans-serif;color:' + textColor + ';opacity:0.9;text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      } else {
+        el.textContent = stripInline(cl);
+        el.style.cssText = 'font:7.5px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      }
+      parentEl.appendChild(el);
+      shown++;
+    }
+    return shown;
+  }
+
+  // Two-column layout: split at || separator
+  var sepIdx = -1;
+  for (var i = 0; i < contentLines.length; i++) {
+    if (contentLines[i] === '||') { sepIdx = i; break; }
+  }
+
+  if (sepIdx >= 0) {
+    var leftLines = contentLines.slice(0, sepIdx);
+    var rightLines = contentLines.slice(sepIdx + 1);
+    var twoColWrap = document.createElement('div');
+    twoColWrap.style.cssText = 'display:flex;flex-direction:row;gap:4%;width:100%;';
+    var leftCol = document.createElement('div');
+    leftCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
+    var rightCol = document.createElement('div');
+    rightCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
+    var leftShown = renderLines(leftLines, 4, leftCol);
+    var rightShown = renderLines(rightLines, 4, rightCol);
+    if (leftShown > 0 || rightShown > 0) {
+      twoColWrap.appendChild(leftCol);
+      twoColWrap.appendChild(rightCol);
+      overlay.appendChild(twoColWrap);
+    }
+  } else {
+    renderLines(contentLines, 6, overlay);
+  }
+
+  if (!overlay.children.length) return null;
+  return overlay;
+}
+
 const PREVIEW_VIEW_GROUP = 'core-preview-view';
 const PREVIEW_SLIDE_BUTTON_ID = 'core-preview-slide';
 const PREVIEW_OVERVIEW_BUTTON_ID = 'core-preview-overview';
@@ -431,6 +548,123 @@ function parseSlidePreview(slide) {
   };
 }
 
+function parseSlideBg(top) {
+  const s = String(top || '');
+  const result = {};
+  const tintMatch = s.match(/\{\{bgtint:([^}]+)\}\}/) || s.match(/^:bgtint:(.+?):$/m);
+  if (tintMatch) result.tint = tintMatch[1].trim();
+  const bgMatch = s.match(/!\[background(?:[^\]]*)\]\(([^)]+)\)/);
+  if (bgMatch) {
+    const src = cleanMediaSrc(bgMatch[1]);
+    if (src && !/^:?sticky$/i.test(src)) {
+      result.image = { isVideo: isVideoSrc(src), src };
+    }
+  }
+  return result;
+}
+
+function parseCanvasBlock1(top) {
+  const s = String(top || '');
+  const match = s.match(/\{\{canvas_block_1:([^}]+)\}\}/);
+  if (!match) return {};
+  const result = {};
+  match[1].split(',').forEach(function(pair) {
+    const eq = pair.indexOf('=');
+    if (eq >= 0) result[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+  });
+  return result;
+}
+
+function parseZoneFromTop(top) {
+  const s = String(top || '');
+  if (s.includes('{{upperthird}}')) return 'upperthird';
+  if (s.includes('{{lowerthird}}')) return 'lowerthird';
+  if (s.includes('{{shiftright}}')) return 'shiftright';
+  if (s.includes('{{shiftleft}}')) return 'shiftleft';
+  if (s.includes('{{topleft}}')) return 'topleft';
+  if (s.includes('{{topright}}')) return 'topright';
+  if (s.includes('{{bottomleft}}')) return 'bottomleft';
+  if (s.includes('{{bottomright}}')) return 'bottomright';
+  const blockZone = s.match(/\{\{canvas_block_1:[^}]*?zone=([^,}]+)/);
+  if (blockZone) return blockZone[1].trim();
+  return 'center';
+}
+
+function createSlideThumb(slide, host, rendererCtx, h, v) {
+  updateMediaRuntime(host, rendererCtx);
+  const top = String(slide?.top || '');
+  const body = String(slide?.body || '');
+  const bg = parseSlideBg(top);
+  const isDark = top.includes('{{darkbg}}');
+  const zone = parseZoneFromTop(top);
+  const canvasBlock = parseCanvasBlock1(top);
+
+  const wrap = document.createElement('div');
+  wrap.dataset.slideThumbWrap = '1';
+  wrap.style.cssText = [
+    'position:relative',
+    'width:100%',
+    'padding-top:56.25%',
+    'overflow:hidden',
+    'border-radius:5px',
+    'background:#111827',
+    'flex-shrink:0'
+  ].join(';');
+
+  const stage = document.createElement('div');
+  stage.style.cssText = 'position:absolute;inset:0;overflow:hidden;';
+
+  // Background: image as CSS, video as <video> element
+  if (bg.image) {
+    const src = resolveMediaDisplaySrc(bg.image.src, host, rendererCtx);
+    if (src) {
+      if (bg.image.isVideo) {
+        const video = document.createElement('video');
+        video.src = src;
+        video.muted = true;
+        video.autoplay = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;z-index:0;';
+        stage.appendChild(video);
+      } else {
+        stage.style.backgroundImage = 'url("' + src.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '")';
+        stage.style.backgroundSize = 'cover';
+        stage.style.backgroundPosition = 'center';
+      }
+    }
+  }
+
+  // Tint overlay
+  if (bg.tint) {
+    const tintEl = document.createElement('div');
+    tintEl.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:1;';
+    const tv = bg.tint;
+    if (/^(linear-gradient|radial-gradient|conic-gradient)\s*\(/i.test(tv)) {
+      tintEl.style.backgroundImage = tv;
+    } else if (!/^image\s*:/i.test(tv)) {
+      tintEl.style.backgroundColor = tv;
+    }
+    stage.appendChild(tintEl);
+  }
+
+  // Text content overlay
+  const textOverlay = renderThumbTextOverlay(body, isDark, zone, canvasBlock.color || '');
+  if (textOverlay) stage.appendChild(textOverlay);
+
+  wrap.appendChild(stage);
+
+  // Slide number badge — appended to wrap (not stage) so it stays above the
+  // screenshot overlay (z-index:10) that doThumbCapture injects into wrap.
+  if (v != null) {
+    const numBadge = document.createElement('div');
+    numBadge.textContent = String(Number(v) + 1);
+    numBadge.style.cssText = 'position:absolute;top:0;left:0;font:700 9px/1 sans-serif;color:#fff;background:rgba(0,0,0,0.55);padding:4px 5px;border-radius:0 0 6px 0;pointer-events:none;letter-spacing:.03em;z-index:15;';
+    wrap.appendChild(numBadge);
+  }
+  return wrap;
+}
+
 function createNavigatorTileRenderer(rendererCtx = {}) {
   let menuEl = null;
   const closeMenu = () => {
@@ -496,16 +730,77 @@ function createNavigatorTileRenderer(rendererCtx = {}) {
     document.addEventListener('keydown', handleKeydown, true);
   };
 
+  function thumbSlideHash(top, body) {
+    const s = String(top || '') + '\x00' + String(body || '');
+    let hash = 5381;
+    for (let i = 0; i < s.length; i++) {
+      hash = (((hash << 5) + hash) ^ s.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(36);
+  }
+
+  function createThumbNotesIcon() {
+    const icon = document.createElement('div');
+    icon.dataset.notesIcon = '1';
+    icon.style.cssText = 'position:absolute;top:0;right:0;z-index:15;background:rgba(255,255,255,0.88);padding:3.5px 4px;border-radius:0 0 0 6px;display:flex;flex-direction:column;gap:2px;pointer-events:none;';
+    for (let i = 0; i < 3; i++) {
+      const line = document.createElement('i');
+      line.style.cssText = 'display:block;width:10px;height:1.5px;background:rgba(0,0,0,0.5);border-radius:1px;';
+      icon.appendChild(line);
+    }
+    return icon;
+  }
+
+  // Screenshot thumbnail state
+  const thumbQueue = new Map();
+  let thumbFlushTimer = null;
+  let captureChain = Promise.resolve();
+
+  async function doThumbCapture(entries) {
+    if (!window.electronAPI?.captureSlidesThumbnails) return;
+    const slug = String(rendererCtx.slug || '').trim();
+    const mdFile = String(rendererCtx.mdFile || '').trim();
+    if (!slug || !mdFile) return;
+    const slides = entries.map((e) => ({ h: e.h, v: e.v, hash: e.hash }));
+    try {
+      const result = await window.electronAPI.captureSlidesThumbnails(slug, mdFile, slides, 480, 270);
+      if (!result?.success || !Array.isArray(result.thumbnails)) return;
+      for (const thumb of result.thumbnails) {
+        if (!thumb?.dataUrl) continue;
+        const entry = entries.find((e) => e.h === thumb.h && e.v === thumb.v);
+        if (!entry?.wrapEl || !document.contains(entry.wrapEl)) continue;
+        // Remove any prior screenshot overlay before adding the new one
+        const prior = entry.wrapEl.querySelector('[data-slide-screenshot]');
+        if (prior) prior.remove();
+        const img = document.createElement('img');
+        img.dataset.slideScreenshot = '1';
+        img.src = thumb.dataUrl;
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:10;border-radius:5px;';
+        entry.wrapEl.appendChild(img);
+      }
+    } catch (_err) {
+      // silently ignore
+    }
+  }
+
+  function scheduleThumbFlush() {
+    if (thumbFlushTimer) clearTimeout(thumbFlushTimer);
+    thumbFlushTimer = setTimeout(() => {
+      thumbFlushTimer = null;
+      if (!thumbQueue.size) return;
+      const entries = Array.from(thumbQueue.values());
+      thumbQueue.clear();
+      captureChain = captureChain.then(() => doThumbCapture(entries)).catch(() => {});
+    }, 200);
+  }
+
   return ({ host, slide, h, v, hasTopMatter }) => {
-    const preview = parseSlidePreview(slide);
     const shell = document.createElement('div');
     shell.style.cssText = [
       'position:relative',
       'display:flex',
       'flex-direction:column',
-      'gap:6px',
-      'min-height:110px',
-      'padding:10px'
+      'padding:6px'
     ].join(';');
 
     if (hasTopMatter) {
@@ -521,70 +816,17 @@ function createNavigatorTileRenderer(rendererCtx = {}) {
       shell.appendChild(topBar);
     }
 
-    const id = document.createElement('div');
-    id.textContent = `V${Number(v) + 1}`;
-    id.style.cssText = 'font:10px/1.2 sans-serif; color:#a7b4cf; text-transform:uppercase; letter-spacing:.04em;';
-    shell.appendChild(id);
+    const top = String(slide?.top || '');
+    const body = String(slide?.body || '');
+    const thumbHash = thumbSlideHash(top, body);
+    const wrap = createSlideThumb(slide, host, rendererCtx, h, v);
+    thumbQueue.set(`${h}_${v}`, { h, v, hash: thumbHash, wrapEl: wrap });
+    scheduleThumbFlush();
+    shell.appendChild(wrap);
 
-    const titleText = preview.heading || (preview.imageOnly ? 'Media' : (preview.isBlank ? '(blank slide)' : ''));
-    if (titleText) {
-      const title = document.createElement('div');
-      title.textContent = titleText;
-      title.style.cssText = 'font:700 14px/1.25 sans-serif; color:#eef3ff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
-      shell.appendChild(title);
+    if (String(slide?.notes || '').trim()) {
+      wrap.appendChild(createThumbNotesIcon());
     }
-
-    const bodyWrap = document.createElement('div');
-    bodyWrap.style.cssText = 'display:flex; gap:8px; min-height:34px; align-items:flex-start;';
-    const textCol = document.createElement('div');
-    textCol.style.cssText = 'min-width:0; flex:1 1 auto;';
-
-    if (preview.twoCol) {
-      const twoCol = document.createElement('div');
-      twoCol.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:6px;';
-      preview.twoCol.forEach((segment, index) => {
-        const block = document.createElement('div');
-        block.textContent = plainText(segment) || `(column ${index + 1})`;
-        block.style.cssText = [
-          'min-height:38px',
-          'padding:4px 5px',
-          'border-radius:6px',
-          'font:10px/1.2 sans-serif',
-          'background:rgba(255,255,255,0.08)',
-          'overflow:hidden'
-        ].join(';');
-        twoCol.appendChild(block);
-      });
-      textCol.appendChild(twoCol);
-    } else {
-      const body = document.createElement('div');
-      body.style.cssText = 'font:11px/1.3 sans-serif; color:#bcc8de; min-height:34px;';
-      if (preview.bodyLines.length) {
-        preview.bodyLines.slice(0, 3).forEach((line) => {
-          const textLine = document.createElement('div');
-          textLine.textContent = line;
-          body.appendChild(textLine);
-        });
-      } else if (preview.citeLines.length) {
-        preview.citeLines.forEach((line) => {
-          const citeLine = document.createElement('div');
-          citeLine.textContent = line;
-          citeLine.style.cssText = 'font-style:italic; color:#a9b8d5;';
-          body.appendChild(citeLine);
-        });
-      } else if (preview.isBlank) {
-        body.textContent = '(blank slide)';
-        body.style.fontStyle = 'italic';
-        body.style.color = '#7f8aa3';
-      }
-      textCol.appendChild(body);
-    }
-    bodyWrap.appendChild(textCol);
-    const navThumb = createSquareMediaThumb(preview, 52, host || null, rendererCtx);
-    if (navThumb) {
-      bodyWrap.appendChild(navThumb);
-    }
-    shell.appendChild(bodyWrap);
 
     shell.addEventListener('contextmenu', (event) => {
       event.preventDefault();
@@ -1420,6 +1662,34 @@ export function getBuilderExtensions(ctx = {}) {
         return;
       }
       activateSlideSorterMode(host);
+    }
+  });
+
+  host.on('save:after', ({ success } = {}) => {
+    if (!success) return;
+    const { v } = host.getSelection();
+    const notesEl = document.getElementById('notes-editor');
+    const hasNotes = !!(notesEl?.textContent || '').trim();
+    const slideList = document.getElementById('slide-list');
+    if (!slideList) return;
+    const tile = slideList.querySelector(`.slide-item-tile[data-v-index="${v}"]`);
+    if (!tile) return;
+    const existing = tile.querySelector('[data-notes-icon]');
+    if (hasNotes && !existing) {
+      const thumbWrap = tile.querySelector('[data-slide-thumb-wrap]');
+      if (thumbWrap) {
+        const icon = document.createElement('div');
+        icon.dataset.notesIcon = '1';
+        icon.style.cssText = 'position:absolute;top:0;right:0;z-index:15;background:rgba(255,255,255,0.88);padding:3.5px 4px;border-radius:0 0 0 6px;display:flex;flex-direction:column;gap:2px;pointer-events:none;';
+        for (let i = 0; i < 3; i++) {
+          const line = document.createElement('i');
+          line.style.cssText = 'display:block;width:10px;height:1.5px;background:rgba(0,0,0,0.5);border-radius:1px;';
+          icon.appendChild(line);
+        }
+        thumbWrap.appendChild(icon);
+      }
+    } else if (!hasNotes && existing) {
+      existing.remove();
     }
   });
 
