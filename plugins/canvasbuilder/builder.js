@@ -256,7 +256,198 @@ export function getBuilderExtensions(ctx = {}) {
   // Initial inspector sync
   syncInspector();
 
+  // Resize drag handles
+  setupPreviewCanvasResize();
+  setupCanvasNotesResize();
+  setupWysiwygNotesResize();
+  setupColumnResize();
+  setupInspectorResize();
+
   return [];
+}
+
+function makeDragOverlay(cursor) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;cursor:${cursor};`;
+  document.body.appendChild(el);
+  return el;
+}
+
+function setupPreviewCanvasResize() {
+  const handle = document.getElementById('preview-canvas-resize-handle');
+  const previewFrame = document.getElementById('preview-frame');
+  const canvasEditorPanel = document.getElementById('canvas-editor-panel');
+  if (!handle || !previewFrame || !canvasEditorPanel) return;
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    const container = handle.parentElement;
+    const frameWrap = previewFrame.parentElement;
+    const startY = e.clientY;
+    const startH = frameWrap.offsetHeight;
+
+    handle.classList.add('is-resizing');
+    const overlay = makeDragOverlay('row-resize');
+
+    function onMouseMove(e) {
+      const containerH = container.offsetHeight;
+      const newH = Math.max(80, Math.min(containerH - 80, startH + (e.clientY - startY)));
+      frameWrap.style.flex = `0 0 ${(newH / containerH) * 100}%`;
+    }
+
+    function onMouseUp() {
+      handle.classList.remove('is-resizing');
+      overlay.remove();
+      const pct = (frameWrap.offsetHeight / container.offsetHeight) * 100;
+      localStorage.setItem('builder-preview-canvas-split', pct);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function setupWysiwygNotesResize() {
+  const handle = document.getElementById('wysiwyg-notes-resize-handle');
+  const wysiwygPanel = document.querySelector('.builder-slide-wysiwyg');
+  const notesPanel = document.querySelector('.builder-notes');
+  if (!handle || !wysiwygPanel || !notesPanel) return;
+
+  const minH = 100;
+
+  const savedWysiwyg = localStorage.getItem('builder-wysiwyg-height');
+  const savedNotes = localStorage.getItem('builder-notes-height');
+  if (savedWysiwyg) wysiwygPanel.style.height = savedWysiwyg + 'px';
+  if (savedNotes) notesPanel.style.height = savedNotes + 'px';
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startWysiwygH = wysiwygPanel.offsetHeight;
+    const startNotesH = notesPanel.offsetHeight;
+
+    handle.classList.add('is-resizing');
+    const overlay = makeDragOverlay('row-resize');
+
+    function onMouseMove(e) {
+      const delta = e.clientY - startY;
+      wysiwygPanel.style.height = Math.max(minH, startWysiwygH + delta) + 'px';
+      notesPanel.style.height = Math.max(minH, startNotesH - delta) + 'px';
+    }
+
+    function onMouseUp() {
+      handle.classList.remove('is-resizing');
+      overlay.remove();
+      localStorage.setItem('builder-wysiwyg-height', wysiwygPanel.offsetHeight);
+      localStorage.setItem('builder-notes-height', notesPanel.offsetHeight);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function setupCanvasNotesResize() {
+  const handle = document.getElementById('canvas-notes-resize-handle');
+  const notesPanel = document.querySelector('.builder-right > .builder-notes');
+  if (!handle || !notesPanel) return;
+
+  const savedNotes = localStorage.getItem('builder-canvas-notes-height');
+  notesPanel.style.height = (savedNotes || '180') + 'px';
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startNotesH = notesPanel.offsetHeight;
+
+    handle.classList.add('is-resizing');
+    const overlay = makeDragOverlay('row-resize');
+
+    function onMouseMove(e) {
+      const delta = startY - e.clientY;
+      notesPanel.style.height = Math.max(80, Math.min(600, startNotesH + delta)) + 'px';
+    }
+
+    function onMouseUp() {
+      handle.classList.remove('is-resizing');
+      overlay.remove();
+      localStorage.setItem('builder-canvas-notes-height', notesPanel.offsetHeight);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function setupColumnResize() {
+  const handle = document.getElementById('mid-right-resize-handle');
+  const middleEl = document.querySelector('.builder-middle');
+  if (!handle || !middleEl) return;
+
+  const saved = localStorage.getItem('builder-col-middle-width');
+  if (saved) middleEl.style.width = saved + 'px';
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = middleEl.offsetWidth;
+    handle.classList.add('is-resizing');
+    const overlay = makeDragOverlay('col-resize');
+
+    function onMouseMove(e) {
+      middleEl.style.width = Math.max(300, Math.min(900, startWidth + (e.clientX - startX))) + 'px';
+    }
+
+    function onMouseUp() {
+      handle.classList.remove('is-resizing');
+      overlay.remove();
+      localStorage.setItem('builder-col-middle-width', middleEl.offsetWidth);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function setupInspectorResize() {
+  const handle = document.getElementById('right-insp-resize-handle');
+  const inspEl = document.getElementById('builder-inspector');
+  if (!handle || !inspEl) return;
+
+  const saved = localStorage.getItem('builder-inspector-width');
+  if (saved) inspEl.style.width = saved + 'px';
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = inspEl.offsetWidth;
+    handle.classList.add('is-resizing');
+    const overlay = makeDragOverlay('col-resize');
+
+    function onMouseMove(e) {
+      const newWidth = Math.max(170, Math.min(520, startWidth + (startX - e.clientX)));
+      inspEl.style.width = newWidth + 'px';
+    }
+
+    function onMouseUp() {
+      handle.classList.remove('is-resizing');
+      overlay.remove();
+      localStorage.setItem('builder-inspector-width', inspEl.offsetWidth);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
 }
 
 function _populateFontSelect(sel) {
