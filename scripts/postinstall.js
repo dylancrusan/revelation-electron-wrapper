@@ -4,6 +4,8 @@ require('../plugins/bibletext/fetch-bibles');
 require('./fetch-effectgenerator');
 // Call fetch-theme-thumbnails.js after install to ensure theme thumbnails are present
 require('./fetch-theme-thumbnails');
+// Call fetch-oldcss.js after install to ensure legacy CSS assets are present
+require('./fetch-oldcss');
 // Call fetch-mediafx-gallery.js after install to ensure gallery previews are present
 require('./fetch-mediafx-gallery');
 // Call download-libs.js for WordPress plugin bundled libraries
