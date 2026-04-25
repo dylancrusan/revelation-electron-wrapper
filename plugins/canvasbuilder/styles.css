@@ -270,6 +270,55 @@
   .canvas-act-btn { font-size: 9px; padding: 2px 4px; }
 }
 
+/* ── Notes rendered view (in builder notes panel) ───────────────────────── */
+
+.notes-rendered-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12px;
+  font-family: Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  color: #e6e6e6;
+  background: #0f1115;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.notes-rendered-view.is-empty::before {
+  content: 'No notes for this slide';
+  color: #4a5068;
+  font-style: italic;
+  pointer-events: none;
+  display: block;
+}
+
+.notes-rendered-view p { margin: 0 0 6px; }
+.notes-rendered-view ul,
+.notes-rendered-view ol { margin: 4px 0; padding-left: 20px; }
+.notes-rendered-view li { margin-bottom: 2px; }
+.notes-rendered-view h1,
+.notes-rendered-view h2,
+.notes-rendered-view h3 { margin: 8px 0 4px; line-height: 1.2; }
+.notes-rendered-view h1 { font-size: 1.2em; }
+.notes-rendered-view h2 { font-size: 1.08em; }
+.notes-rendered-view h3 { font-size: 0.96em; }
+.notes-rendered-view hr { border: none; border-top: 1px solid #333; margin: 8px 0; }
+.notes-rendered-view code { background: #1e2230; border-radius: 3px; padding: 1px 4px; font-family: "JetBrains Mono", monospace; font-size: 0.9em; }
+.notes-rendered-view a { color: #6fa3ff; }
+.notes-rendered-view del { opacity: 0.6; }
+
+.notes-rendered-view .notes-preview-empty {
+  color: #4a5068;
+  font-style: italic;
+}
+
+.notes-rendered-view .notes-preview-gap {
+  height: 8px;
+}
+
 /* ── Notes preview panel ─────────────────────────────────────────────────── */
 
 .cbp-notes-root {

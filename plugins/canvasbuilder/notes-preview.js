@@ -3,10 +3,19 @@
  * Converts notes content (markdown + inline HTML) to rendered HTML.
  */
 
-// Apply bold/italic markdown to a text segment that doesn't cross HTML tag boundaries.
 function inlineMarkdown(text) {
+  // Bold (** or __)
   text = text.replace(/\*\*([^*<>]+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/__([^_<>]+?)__/g, '<strong>$1</strong>');
+  // Italic (* or _)
   text = text.replace(/(?<!\*)\*(?!\*)([^*<>]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+  text = text.replace(/(?<!_)_(?!_)([^_<>]+?)(?<!_)_(?!_)/g, '<em>$1</em>');
+  // Strikethrough (~~)
+  text = text.replace(/~~([^~<>]+?)~~/g, '<del>$1</del>');
+  // Inline code
+  text = text.replace(/`([^`<>]+?)`/g, '<code>$1</code>');
+  // Links [text](url)
+  text = text.replace(/\[([^\]<>]+?)\]\(([^)<>]+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   return text;
 }
 
@@ -41,6 +50,18 @@ function renderNotes(raw) {
     }
 
     closeList();
+
+    const headingMatch = trimmed.match(/^(#{1,3}) (.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      html += `<h${level}>${inlineMarkdown(headingMatch[2])}</h${level}>`;
+      continue;
+    }
+
+    if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+      html += '<hr>';
+      continue;
+    }
 
     if (!trimmed) {
       html += '<div class="notes-preview-gap"></div>';

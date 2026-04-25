@@ -597,7 +597,7 @@ body.is-column-md-mode .column-markdown-panel {
 }
 
 .builder-right > .builder-notes .panel-body {
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .builder-right > .builder-panel.builder-preview[hidden] { display: none; }

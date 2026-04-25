@@ -13,6 +13,7 @@ import {
   setBlockStyleProp,
   getBodyInfo
 } from './canvas-editor.js';
+import { renderNotes } from './notes-preview.js';
 
 function ensureStyles() {
   const id = 'canvasbuilder-styles';
@@ -262,6 +263,88 @@ export function getBuilderExtensions(ctx = {}) {
   setupWysiwygNotesResize();
   setupColumnResize();
   setupInspectorResize();
+
+  // Notes WYSIWYG editor
+  const notesEditor   = document.getElementById('notes-editor');
+  const notesRendered = document.getElementById('notes-rendered');
+  if (notesEditor && notesRendered) {
+
+    function htmlToMarkdown(container) {
+      function walk(node) {
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'br') return '\n';
+        if (tag === 'hr') return '---\n';
+        if (tag === 'ul' || tag === 'ol') {
+          return Array.from(node.children).map((li, i) => {
+            const content = walk(li).replace(/\n+$/, '');
+            return tag === 'ol' ? `${i + 1}. ${content}` : `- ${content}`;
+          }).join('\n') + '\n';
+        }
+        const inner = Array.from(node.childNodes).map(walk).join('');
+        switch (tag) {
+          case 'strong': case 'b':  return `**${inner}**`;
+          case 'em':     case 'i':  return `*${inner}*`;
+          case 'del': case 's': case 'strike': return `~~${inner}~~`;
+          case 'u':    return inner;
+          case 'code': return `\`${inner}\``;
+          case 'a':    return `[${inner}](${node.getAttribute('href') || ''})`;
+          case 'h1':   return `# ${inner}\n`;
+          case 'h2':   return `## ${inner}\n`;
+          case 'h3':   return `### ${inner}\n`;
+          case 'p': case 'div': {
+            if (node.classList.contains('notes-preview-gap')) return '\n';
+            if (!inner.trim()) return '\n';
+            return inner.endsWith('\n') ? inner : inner + '\n';
+          }
+          default: return inner;
+        }
+      }
+      const raw = Array.from(container.childNodes).map(walk).join('');
+      return raw.replace(/\n{3,}/g, '\n\n').trimEnd();
+    }
+
+    function syncToMarkdown() {
+      const md = htmlToMarkdown(notesRendered);
+      notesEditor.value = md;
+      notesEditor.dispatchEvent(new Event('input', { bubbles: true }));
+      notesRendered.classList.toggle('is-empty', !notesRendered.textContent.trim());
+    }
+
+    function loadFromMarkdown() {
+      const md = notesEditor.value.trim();
+      notesRendered.innerHTML = md ? renderNotes(notesEditor.value) : '';
+      notesRendered.classList.toggle('is-empty', !md);
+    }
+
+    loadFromMarkdown();
+
+    notesRendered.addEventListener('input', syncToMarkdown);
+
+    notesRendered.addEventListener('paste', e => {
+      e.preventDefault();
+      const text = e.clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+
+    notesRendered.addEventListener('keydown', e => {
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'b' || key === 'i' || key === 'u') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (key === 'b') { document.execCommand('bold');   syncToMarkdown(); }
+        if (key === 'i') { document.execCommand('italic'); syncToMarkdown(); }
+        // 'u' is intentionally blocked — no clean Markdown for underline
+      }
+    });
+
+    host.on('selection:changed', () => {
+      requestAnimationFrame(loadFromMarkdown);
+    });
+  }
 
   return [];
 }
