@@ -330,8 +330,14 @@ export function getBuilderExtensions(ctx = {}) {
 
     notesRendered.addEventListener('keydown', e => {
       const isMod = e.ctrlKey || e.metaKey;
-      if (!isMod || e.shiftKey || e.altKey) return;
+      if (!isMod || e.altKey) return;
       const key = e.key.toLowerCase();
+      if (key === 'z') {
+        // Let the browser handle undo/redo natively; just stop it reaching the builder.
+        e.stopPropagation();
+        return;
+      }
+      if (e.shiftKey) return;
       if (key === 'b' || key === 'i' || key === 'u') {
         e.preventDefault();
         e.stopPropagation();
