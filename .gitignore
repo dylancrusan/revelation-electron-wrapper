@@ -36,3 +36,6 @@ WordPress/revelation-presentations/docs/
 WordPress/build/
 
 .claude
+
+# Local launcher shortcut
+REVELation.command

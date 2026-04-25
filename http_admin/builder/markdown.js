@@ -218,8 +218,32 @@ function parseSlide(raw, noteSeparator = NOTE_SEPARATOR_CURRENT) {
   return {
     top: topLines.join('\n'),
     body: bodyLines.join('\n'),
-    notes: notesLines.join('\n')
+    notes: htmlNotesToMarkdown(notesLines.join('\n'))
   };
+}
+
+function htmlNotesToMarkdown(text) {
+  if (!/<[a-z][\s\S]*>/i.test(text)) return text;
+  let md = text;
+  md = md.replace(/<br\s*\/?>/gi, '\n');
+  md = md.replace(/<\/p>/gi, '\n\n');
+  md = md.replace(/<p[^>]*>/gi, '');
+  md = md.replace(/<\/li>/gi, '\n');
+  md = md.replace(/<li[^>]*>/gi, '- ');
+  md = md.replace(/<\/ul>|<\/ol>/gi, '\n');
+  md = md.replace(/<ul[^>]*>|<ol[^>]*>/gi, '');
+  md = md.replace(/<strong[^>]*>([\s\S]*?)<\/strong>/gi, '**$1**');
+  md = md.replace(/<b[^>]*>([\s\S]*?)<\/b>/gi, '**$1**');
+  md = md.replace(/<em[^>]*>([\s\S]*?)<\/em>/gi, '*$1*');
+  md = md.replace(/<i[^>]*>([\s\S]*?)<\/i>/gi, '*$1*');
+  md = md.replace(/<[^>]+>/g, '');
+  md = md.replace(/&nbsp;/g, ' ');
+  md = md.replace(/&lt;/g, '<');
+  md = md.replace(/&gt;/g, '>');
+  md = md.replace(/&amp;/g, '&');
+  md = md.replace(/&quot;/g, '"');
+  md = md.replace(/\n{3,}/g, '\n\n').trim();
+  return md;
 }
 
 // Build a single slide's markdown from { top, body, notes }.
