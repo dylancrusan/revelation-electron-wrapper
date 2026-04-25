@@ -4,6 +4,8 @@
  */
 
 function inlineMarkdown(text) {
+  // Color spans {#rrggbb:text} or {#rgb:text}
+  text = text.replace(/\{(#[0-9a-fA-F]{3,6}):([^}]+)\}/g, '<span style="color:$1">$2</span>');
   // Bold (** or __)
   text = text.replace(/\*\*([^*<>]+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/__([^_<>]+?)__/g, '<strong>$1</strong>');

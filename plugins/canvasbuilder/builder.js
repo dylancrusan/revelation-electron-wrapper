@@ -35,6 +35,10 @@ export function getBuilderExtensions(ctx = {}) {
   const dir    = String(ctx.dir    || '').trim();
   const mdFile = String(ctx.mdFile || '').trim();
 
+  // Shared state for context-aware inspector color picker
+  let _notesSelRange = null;
+  let _syncNotes     = null;
+
   // ── Canvas panel ───────────────────────────────────────────────────────────
   const canvasPanel = document.getElementById('canvas-editor-panel');
   if (!canvasPanel) return [];
@@ -50,6 +54,9 @@ export function getBuilderExtensions(ctx = {}) {
   host.on('document:changed', () => {
     renderCanvas();
     syncInspector();
+  });
+  host.on('save:before', () => {
+    if (_syncNotes) _syncNotes();
   });
 
   // ── Inspector wiring ───────────────────────────────────────────────────────
@@ -170,34 +177,46 @@ export function getBuilderExtensions(ctx = {}) {
     });
   }
 
-  // Color — simple color input picker for now
+  // Color — xcp palette, context-aware (canvas text or notes text)
   const colorBtn  = document.getElementById('insp-color-btn');
   const colorMenu = document.getElementById('insp-color-menu');
   if (colorBtn && colorMenu) {
+    colorBtn.addEventListener('mousedown', () => {
+      const notesEl = document.getElementById('notes-rendered');
+      const sel = window.getSelection();
+      if (notesEl && sel && sel.rangeCount > 0 && notesEl.contains(sel.anchorNode)) {
+        _notesSelRange = sel.getRangeAt(0).cloneRange();
+      } else {
+        _notesSelRange = null;
+      }
+    });
+
     colorBtn.addEventListener('click', e => {
       e.stopPropagation();
-      // Build a simple hex input if menu is empty
-      if (!colorMenu.querySelector('.cbp-color-input')) {
-        colorMenu.innerHTML = '';
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 2px;';
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.className = 'cbp-color-input';
-        input.style.cssText = 'width:40px;height:28px;border:1px solid #303545;background:#10131a;padding:0;border-radius:4px;cursor:pointer;flex-shrink:0;';
-        input.value = getBlockStyle().color || '#ffffff';
-        input.addEventListener('input', () => {
-          setBlockStyleProp('color', input.value);
-          const swatch = colorBtn.querySelector('.insp-color-swatch');
-          if (swatch) swatch.style.background = input.value;
-        });
-        row.appendChild(input);
-        colorMenu.appendChild(row);
-      } else {
-        colorMenu.querySelector('.cbp-color-input').value = getBlockStyle().color || '#ffffff';
+      if (!colorMenu.hasChildNodes()) {
+        colorMenu.appendChild(_buildXcpMenu(hex => {
+          const notesEl = document.getElementById('notes-rendered');
+          if (_notesSelRange && notesEl && _syncNotes) {
+            notesEl.focus();
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(_notesSelRange);
+            if (!sel.isCollapsed) {
+              document.execCommand('foreColor', false, hex);
+              _syncNotes();
+            }
+          } else {
+            setBlockStyleProp('color', hex);
+            const swatch = colorBtn.querySelector('.insp-color-swatch');
+            if (swatch) swatch.style.background = hex;
+            syncInspector();
+          }
+          colorMenu.hidden = true;
+        }));
       }
       colorMenu.hidden = !colorMenu.hidden;
     });
+
     document.addEventListener('click', e => {
       if (!colorBtn.contains(e.target) && !colorMenu.contains(e.target)) {
         colorMenu.hidden = true;
@@ -269,6 +288,13 @@ export function getBuilderExtensions(ctx = {}) {
   const notesRendered = document.getElementById('notes-rendered');
   if (notesEditor && notesRendered) {
 
+    function rgbToHex(color) {
+      if (/^#[0-9a-fA-F]{3,6}$/.test(color)) return color.toLowerCase();
+      const m = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+      if (!m) return null;
+      return '#' + [m[1], m[2], m[3]].map(n => parseInt(n).toString(16).padStart(2, '0')).join('');
+    }
+
     function htmlToMarkdown(container) {
       function walk(node) {
         if (node.nodeType === Node.TEXT_NODE) return node.textContent;
@@ -293,6 +319,12 @@ export function getBuilderExtensions(ctx = {}) {
           case 'h1':   return `# ${inner}\n`;
           case 'h2':   return `## ${inner}\n`;
           case 'h3':   return `### ${inner}\n`;
+          case 'span':
+          case 'font': {
+            const colorVal = (node.style && node.style.color) || node.getAttribute('color') || '';
+            const hex = colorVal ? rgbToHex(colorVal) : null;
+            return hex ? `{${hex}:${inner}}` : inner;
+          }
           case 'p': case 'div': {
             if (node.classList.contains('notes-preview-gap')) return '\n';
             if (!inner.trim()) return '\n';
@@ -311,6 +343,7 @@ export function getBuilderExtensions(ctx = {}) {
       notesEditor.dispatchEvent(new Event('input', { bubbles: true }));
       notesRendered.classList.toggle('is-empty', !notesRendered.textContent.trim());
     }
+    _syncNotes = syncToMarkdown;
 
     function loadFromMarkdown() {
       const md = notesEditor.value.trim();
@@ -537,6 +570,66 @@ function setupInspectorResize() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
+}
+
+function _buildXcpMenu(onPick) {
+  const THEME = [
+    // Row 1: 40% tint
+    '#666666','#C9C9C9','#FFFFFF','#E08585','#F4B183','#FFD966','#A9D18E','#9DC3E6','#6CA0D1','#B093CD',
+    // Row 3: base — Black, Gray, White, Red, Orange, Gold, Green, LightBlue, Navy, Violet
+    '#333333','#A5A5A5','#DFDFDF','#CC3333','#ED7D31','#FFC000','#70AD47','#5B9BD5','#2D5F8E','#7B4EA8',
+    // Row 4: 25% shade
+    '#000000','#7F7F7F','#BFBFBF','#992626','#C55A11','#BF9000','#538135','#2E75B6','#21476A','#5C3A7E',
+  ];
+  const STANDARD = [
+    '#C00000','#FF0000','#FF6600','#FFC000','#FFFF00','#92D050','#00B050','#00B0F0','#002060','#7030A0',
+  ];
+
+  const frag = document.createDocumentFragment();
+
+  const themeLabel = document.createElement('div');
+  themeLabel.className = 'xcp-section-label';
+  themeLabel.textContent = 'THEME COLORS';
+  frag.appendChild(themeLabel);
+
+  const themeGrid = document.createElement('div');
+  themeGrid.className = 'xcp-theme-grid';
+  THEME.forEach(hex => {
+    const s = document.createElement('button');
+    s.type = 'button';
+    s.className = 'xcp-swatch';
+    s.style.background = hex;
+    s.title = hex;
+    s.addEventListener('mousedown', e => e.preventDefault());
+    s.addEventListener('click', () => onPick(hex));
+    themeGrid.appendChild(s);
+  });
+  frag.appendChild(themeGrid);
+
+  const divider = document.createElement('div');
+  divider.className = 'xcp-divider';
+  frag.appendChild(divider);
+
+  const stdLabel = document.createElement('div');
+  stdLabel.className = 'xcp-section-label xcp-section-label--standard';
+  stdLabel.textContent = 'STANDARD COLORS';
+  frag.appendChild(stdLabel);
+
+  const stdGrid = document.createElement('div');
+  stdGrid.className = 'xcp-standard-grid';
+  STANDARD.forEach(hex => {
+    const s = document.createElement('button');
+    s.type = 'button';
+    s.className = 'xcp-swatch xcp-swatch--std';
+    s.style.background = hex;
+    s.title = hex;
+    s.addEventListener('mousedown', e => e.preventDefault());
+    s.addEventListener('click', () => onPick(hex));
+    stdGrid.appendChild(s);
+  });
+  frag.appendChild(stdGrid);
+
+  return frag;
 }
 
 function _populateFontSelect(sel) {

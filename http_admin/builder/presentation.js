@@ -28,13 +28,13 @@ async function savePresentation() {
     return false;
   }
   applyCurrentColumnMarkdown();
-  const content = getFullMarkdown();
   if (typeof window.__revelationBuilderHostInternalEmit === 'function') {
     window.__revelationBuilderHostInternalEmit('save:before', {
       slug,
       mdFile
     });
   }
+  const content = getFullMarkdown();
   setSaveIndicator(tr('Saving…'));
   const res = await window.electronAPI.savePresentationMarkdown({
     slug,

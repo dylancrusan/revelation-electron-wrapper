@@ -14,5 +14,9 @@ window.RevelationPlugins.canvasbuilder = {
     if ((this._ctx?.page || '').toLowerCase() !== 'builder') return [];
     const mod = await import('./builder.js');
     return mod.getBuilderExtensions(ctx);
+  },
+
+  preprocessMarkdown(md) {
+    return md.replace(/\{(#[0-9a-fA-F]{3,6}):([^}]+)\}/g, '<span style="color:$1">$2</span>');
   }
 };
