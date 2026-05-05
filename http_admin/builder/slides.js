@@ -45,7 +45,8 @@ import {
   parseSlide,
   buildSlide,
   sanitizeStacks,
-  getNoteSeparatorFromFrontmatter
+  getNoteSeparatorFromFrontmatter,
+  parseFrontMatterText
 } from './markdown.js';
 import { markDirty, setStatus } from './app-state.js';
 import { schedulePreviewUpdate, updatePreview, cancelPreviewUpdateTimer } from './preview.js';
@@ -55,6 +56,37 @@ const slideListDragState = {
   fromV: null,
   active: false
 };
+
+function getAutoSlideRangeConfig() {
+  try {
+    const data = parseFrontMatterText(state.frontmatter || '');
+    const cfg = (data && typeof data === 'object' && data.config) ? data.config : {};
+    const toInt = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= 1 ? n : null; };
+    return {
+      rangeStart: toInt(cfg.autoSlideRangeStart),
+      rangeEnd:   toInt(cfg.autoSlideRangeEnd),
+      colStart:   toInt(cfg.autoSlideColumnStart),
+      colEnd:     toInt(cfg.autoSlideColumnEnd),
+    };
+  } catch {
+    return { rangeStart: null, rangeEnd: null, colStart: null, colEnd: null };
+  }
+}
+
+function getLinearSlideIndex(hIndex, vIndex) {
+  let count = 1;
+  for (let h = 0; h < hIndex; h++) count += (state.stacks[h] || []).length;
+  return count + vIndex;
+}
+
+function createAutoSlidePlayIndicator() {
+  const icon = document.createElement('div');
+  icon.dataset.autoSlideIndicator = '1';
+  // Match the style of the notes icon in the slide navigator (same background, padding, corner radius).
+  icon.style.cssText = 'position:absolute;bottom:0;right:0;z-index:15;background:rgba(255,255,255,0.88);padding:3.5px 5px;border-radius:6px 0 0 0;pointer-events:none;line-height:1;font-size:9px;color:rgba(0,0,0,0.55);';
+  icon.textContent = '▶';
+  return icon;
+}
 
 function clearSlideDragIndicators() {
   if (!slideListEl) return;
@@ -262,6 +294,7 @@ function renderSlideList() {
       total: total || 1
     });
   }
+  const rangeConfig = getAutoSlideRangeConfig();
   column.forEach((slide, vIndex) => {
     const item = document.createElement('div');
     item.className = 'slide-item slide-item-tile';
@@ -272,6 +305,15 @@ function renderSlideList() {
     }
     const pluginTile = buildPluginSlideNavigatorTile(slide, hIndex, vIndex, state.selected.v === vIndex);
     item.appendChild(pluginTile || buildDefaultSlideNavigatorTile(slide, vIndex));
+    const linearIdx = getLinearSlideIndex(hIndex, vIndex);
+    const col1 = hIndex + 1;
+    const inLinearRange = rangeConfig.rangeStart !== null && rangeConfig.rangeEnd !== null
+      && linearIdx >= rangeConfig.rangeStart && linearIdx <= rangeConfig.rangeEnd;
+    const inColumnRange = rangeConfig.colStart !== null && rangeConfig.colEnd !== null
+      && col1 >= rangeConfig.colStart && col1 <= rangeConfig.colEnd;
+    if (inLinearRange || inColumnRange) {
+      item.appendChild(createAutoSlidePlayIndicator());
+    }
     item.addEventListener('click', () => selectSlide(hIndex, vIndex));
     item.addEventListener('dragstart', (event) => {
       if (state.columnMarkdownMode) return;

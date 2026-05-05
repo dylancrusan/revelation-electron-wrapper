@@ -661,6 +661,84 @@
 			"es": "Permite que una acción del usuario detenga el cambio automático de diapositivas"
 			}
 		},
+		"autoSlideRangeStart": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Range: Start Slide",
+			"es": "Rango de avance automático: diapositiva inicial"
+			},
+			"advanced": true,
+			"default": null,
+			"doc": {
+			"en": "First slide number (starting at 1) where auto-advance activates. Loops back here after reaching the end slide.",
+			"es": "Número de la primera diapositiva (desde 1) donde se activa el avance automático."
+			}
+		},
+		"autoSlideRangeEnd": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Range: End Slide",
+			"es": "Rango de avance automático: diapositiva final"
+			},
+			"advanced": true,
+			"default": null,
+			"doc": {
+			"en": "Last slide number (starting at 1) in the auto-advance loop. After this slide, playback loops back to the start slide.",
+			"es": "Número de la última diapositiva (desde 1) en el bucle de avance automático."
+			}
+		},
+		"autoSlideRangeInterval": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Range: Interval (ms)",
+			"es": "Rango de avance automático: intervalo (ms)"
+			},
+			"advanced": true,
+			"default": 5000,
+			"doc": {
+			"en": "Milliseconds between slide transitions within the auto-advance range (default: 5000).",
+			"es": "Milisegundos entre transiciones dentro del rango de avance automático (predeterminado: 5000)."
+			}
+		},
+		"autoSlideColumnStart": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Column Range: Start Column",
+			"es": "Rango de columnas con avance automático: columna inicial"
+			},
+			"advanced": true,
+			"default": null,
+			"doc": {
+			"en": "First column number (1-based) where auto-advance activates. Loops back here after reaching the end column. Use this for multi-column presentations; use Auto Slide Range for single-column (vertical-only) presentations.",
+			"es": "Número de la primera columna (desde 1) donde se activa el avance automático."
+			}
+		},
+		"autoSlideColumnEnd": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Column Range: End Column",
+			"es": "Rango de columnas con avance automático: columna final"
+			},
+			"advanced": true,
+			"default": null,
+			"doc": {
+			"en": "Last column number (1-based) in the auto-advance loop. After all slides in this column are shown, playback loops back to the start column.",
+			"es": "Número de la última columna (desde 1) en el bucle de avance automático."
+			}
+		},
+		"autoSlideColumnInterval": {
+			"type": "number",
+			"label": {
+			"en": "Auto Slide Column Range: Interval (ms)",
+			"es": "Rango de columnas con avance automático: intervalo (ms)"
+			},
+			"advanced": true,
+			"default": 5000,
+			"doc": {
+			"en": "Milliseconds between slide transitions within the column auto-advance range (default: 5000).",
+			"es": "Milisegundos entre transiciones dentro del rango de columnas con avance automático (predeterminado: 5000)."
+			}
+		},
 		"defaultTiming": {
 			"type": "number",
 			"label": {
