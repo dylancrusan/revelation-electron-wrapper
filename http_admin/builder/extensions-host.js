@@ -13,7 +13,7 @@ import {
   dir,
   state
 } from './context.js';
-import { createEmptySlide } from './markdown.js';
+import { createEmptySlide, parseFrontMatterText } from './markdown.js';
 import { markDirty } from './app-state.js';
 import { selectSlide, syncPreviewToEditor } from './slides.js';
 import { schedulePreviewUpdate } from './preview.js';
@@ -805,13 +805,17 @@ function initBuilderExtensionsHost() {
     version: HOST_VERSION,
     apiVersion: HOST_API_VERSION,
     getDocument() {
+      const frontmatter = String(state.frontmatter || '');
+      const parsed = parseFrontMatterText(frontmatter) || {};
+      const media = parsed?.media && typeof parsed.media === 'object' ? parsed.media : {};
       return {
         slug,
         mdFile,
         dir,
-        frontmatter: String(state.frontmatter || ''),
+        frontmatter,
         noteSeparator: String(state.noteSeparator || ':note:'),
-        stacks: deepClone(state.stacks)
+        stacks: deepClone(state.stacks),
+        media
       };
     },
     getSelection() {

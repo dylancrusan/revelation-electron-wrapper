@@ -326,8 +326,6 @@ function updateMediaRuntime(host, context = {}) {
   if (ctxDir) slideSorterMediaRuntime.dir = ctxDir;
 
   if (!host || typeof host.getDocument !== 'function') return;
-  const yaml = window.jsyaml;
-  if (!yaml || typeof yaml.load !== 'function') return;
 
   try {
     const doc = host.getDocument();
@@ -336,6 +334,20 @@ function updateMediaRuntime(host, context = {}) {
     slideSorterMediaRuntime.lastFrontmatter = frontmatter;
     slideSorterMediaRuntime.mediaByTag = {};
 
+    // Use host-provided pre-parsed media when available (avoids re-parsing YAML)
+    const docMedia = doc?.media;
+    if (docMedia && typeof docMedia === 'object') {
+      Object.entries(docMedia).forEach(([tag, entry]) => {
+        const key = String(tag || '').trim();
+        if (!key) return;
+        slideSorterMediaRuntime.mediaByTag[key] = entry || {};
+      });
+      return;
+    }
+
+    // Fall back to YAML parsing
+    const yaml = window.jsyaml;
+    if (!yaml || typeof yaml.load !== 'function') return;
     const yamlText = normalizeFrontmatterYaml(frontmatter);
     if (!yamlText) return;
     const parsed = yaml.load(yamlText) || {};
@@ -371,9 +383,9 @@ function resolveMediaDisplaySrc(rawSrc, host, context = {}) {
     const mediaEntry = slideSorterMediaRuntime.mediaByTag[tag];
     const filename = String(mediaEntry?.filename || '').trim();
     if (!filename) return '';
-    const { dir, slug } = slideSorterMediaRuntime;
-    if (!dir || !slug) return filename;
-    return encodePathSafely(`/${dir}/${slug}/${filename}`);
+    const { dir } = slideSorterMediaRuntime;
+    if (!dir) return filename;
+    return encodePathSafely(`/${dir}/_media/${filename}`);
   }
 
   const { dir, slug } = slideSorterMediaRuntime;
@@ -590,11 +602,12 @@ function parseZoneFromTop(top) {
   return 'center';
 }
 
-function createSlideThumb(slide, host, rendererCtx, h, v) {
+function createSlideThumb(slide, host, rendererCtx, h, v, fallbackBg) {
   updateMediaRuntime(host, rendererCtx);
   const top = String(slide?.top || '');
   const body = String(slide?.body || '');
-  const bg = parseSlideBg(top);
+  const ownBg = parseSlideBg(top);
+  const bg = { image: ownBg.image || (fallbackBg?.image ?? null), tint: ownBg.tint };
   const isDark = top.includes('{{darkbg}}');
   const zone = parseZoneFromTop(top);
   const canvasBlock = parseCanvasBlock1(top);
@@ -618,7 +631,7 @@ function createSlideThumb(slide, host, rendererCtx, h, v) {
   if (bg.image) {
     const src = resolveMediaDisplaySrc(bg.image.src, host, rendererCtx);
     if (src) {
-      if (bg.image.isVideo) {
+      if (bg.image.isVideo || isVideoSrc(src)) {
         const video = document.createElement('video');
         video.src = src;
         video.muted = true;
@@ -756,6 +769,9 @@ function createNavigatorTileRenderer(rendererCtx = {}) {
   let thumbFlushTimer = null;
   let captureChain = Promise.resolve();
 
+  // Sticky background state: tracks last explicit background per column index
+  const stickyBgByColumn = new Map();
+
   async function doThumbCapture(entries) {
     if (!window.electronAPI?.captureSlidesThumbnails) return;
     const slug = String(rendererCtx.slug || '').trim();
@@ -818,8 +834,11 @@ function createNavigatorTileRenderer(rendererCtx = {}) {
 
     const top = String(slide?.top || '');
     const body = String(slide?.body || '');
+    if (v === 0) stickyBgByColumn.delete(h);
+    const ownBg = parseSlideBg(top);
+    if (ownBg.image) stickyBgByColumn.set(h, ownBg);
     const thumbHash = thumbSlideHash(top, body);
-    const wrap = createSlideThumb(slide, host, rendererCtx, h, v);
+    const wrap = createSlideThumb(slide, host, rendererCtx, h, v, ownBg.image ? null : (stickyBgByColumn.get(h) || null));
     thumbQueue.set(`${h}_${v}`, { h, v, hash: thumbHash, wrapEl: wrap });
     scheduleThumbFlush();
     shell.appendChild(wrap);
