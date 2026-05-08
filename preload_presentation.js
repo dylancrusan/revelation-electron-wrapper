@@ -88,5 +88,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     };
     ipcRenderer.on('presentation-plugin-event', handler);
     return () => ipcRenderer.removeListener('presentation-plugin-event', handler);
-  }
+  },
+  captureSlide: () => ipcRenderer.invoke('capture-presentation-slide'),
+  captureNextSlide: (url, h, v) => ipcRenderer.invoke('capture-next-slide', url, h, v),
+  initCaptureWindow: (url) => ipcRenderer.invoke('init-capture-window', url),
 });
