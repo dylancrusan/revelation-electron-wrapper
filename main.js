@@ -261,6 +261,7 @@ function createMainWindow() {
     width: 1380,
     height: 820,
     icon: iconPath,
+    backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'), // Optional
     },
