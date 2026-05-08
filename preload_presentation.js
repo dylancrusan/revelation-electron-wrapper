@@ -90,6 +90,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('presentation-plugin-event', handler);
   },
   captureSlide: () => ipcRenderer.invoke('capture-presentation-slide'),
-  captureNextSlide: (url, h, v) => ipcRenderer.invoke('capture-next-slide', url, h, v),
+  captureNextSlide: (url, h, v, f) => ipcRenderer.invoke('capture-next-slide', url, h, v, f),
   initCaptureWindow: (url) => ipcRenderer.invoke('init-capture-window', url),
 });
