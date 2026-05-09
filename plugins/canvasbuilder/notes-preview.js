@@ -21,6 +21,12 @@ function inlineMarkdown(text) {
   return text;
 }
 
+// Returns the hex color if the entire content is wrapped in {#color:...}, else null.
+function getWrappedColor(content) {
+  const m = content.match(/^\{(#[0-9a-fA-F]{3,6}):(.+)\}$/s);
+  return m ? m[1] : null;
+}
+
 function renderNotes(raw) {
   if (!raw || !raw.trim()) {
     return '<span class="notes-preview-empty">No notes for this slide</span>';
@@ -40,14 +46,20 @@ function renderNotes(raw) {
     const bulletMatch = trimmed.match(/^- (.*)$/);
     if (bulletMatch) {
       if (listType !== 'ul') { closeList(); html += '<ul>'; listType = 'ul'; }
-      html += `<li>${inlineMarkdown(bulletMatch[1])}</li>`;
+      const itemContent = bulletMatch[1];
+      const markerColor = getWrappedColor(itemContent);
+      const liAttr = markerColor ? ` style="color:${markerColor}"` : '';
+      html += `<li${liAttr}>${inlineMarkdown(itemContent)}</li>`;
       continue;
     }
 
     const numberedMatch = trimmed.match(/^\d+\. (.*)$/);
     if (numberedMatch) {
       if (listType !== 'ol') { closeList(); html += '<ol>'; listType = 'ol'; }
-      html += `<li>${inlineMarkdown(numberedMatch[1])}</li>`;
+      const itemContent = numberedMatch[1];
+      const markerColor = getWrappedColor(itemContent);
+      const liAttr = markerColor ? ` style="color:${markerColor}"` : '';
+      html += `<li${liAttr}>${inlineMarkdown(itemContent)}</li>`;
       continue;
     }
 

@@ -35,9 +35,11 @@ export function getBuilderExtensions(ctx = {}) {
   const dir    = String(ctx.dir    || '').trim();
   const mdFile = String(ctx.mdFile || '').trim();
 
-  // Shared state for context-aware inspector color picker
-  let _notesSelRange = null;
-  let _syncNotes     = null;
+  // Shared state for context-aware inspector color picker and list buttons
+  let _notesSelRange     = null;
+  let _bulletSelRange    = null;
+  let _numberSelRange    = null;
+  let _syncNotes         = null;
 
   // ── Canvas panel ───────────────────────────────────────────────────────────
   const canvasPanel = document.getElementById('canvas-editor-panel');
@@ -248,6 +250,59 @@ export function getBuilderExtensions(ctx = {}) {
       const s = getBlockStyle();
       setBlockStyleProp('underline', !s.underline);
       syncInspector();
+    });
+  }
+
+  // Bullet list / Numbered list — context-aware (canvas or notes)
+  const bulletListBtn = document.getElementById('insp-bullet-btn');
+  const numberListBtn = document.getElementById('insp-number-btn');
+
+  function captureNotesRange() {
+    const notesEl = document.getElementById('notes-rendered');
+    const sel = window.getSelection();
+    if (notesEl && sel && sel.rangeCount > 0 && notesEl.contains(sel.anchorNode)) {
+      return sel.getRangeAt(0).cloneRange();
+    }
+    return null;
+  }
+
+  if (bulletListBtn) {
+    bulletListBtn.addEventListener('mousedown', () => {
+      _bulletSelRange = captureNotesRange();
+    });
+    bulletListBtn.addEventListener('click', () => {
+      const notesEl = document.getElementById('notes-rendered');
+      if (_bulletSelRange && notesEl && _syncNotes) {
+        notesEl.focus();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_bulletSelRange);
+        document.execCommand('insertUnorderedList');
+        _syncNotes();
+      } else {
+        setBlockStyleProp('blockType', 'ul');
+        syncInspector();
+      }
+    });
+  }
+
+  if (numberListBtn) {
+    numberListBtn.addEventListener('mousedown', () => {
+      _numberSelRange = captureNotesRange();
+    });
+    numberListBtn.addEventListener('click', () => {
+      const notesEl = document.getElementById('notes-rendered');
+      if (_numberSelRange && notesEl && _syncNotes) {
+        notesEl.focus();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_numberSelRange);
+        document.execCommand('insertOrderedList');
+        _syncNotes();
+      } else {
+        setBlockStyleProp('blockType', 'ol');
+        syncInspector();
+      }
     });
   }
 

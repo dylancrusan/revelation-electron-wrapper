@@ -277,6 +277,7 @@ function detectBodyBlockType(body) {
     if (t.startsWith('## '))    return 'h2';
     if (t.startsWith('# '))     return 'h1';
     if (t.startsWith('- '))     return 'ul';
+    if (/^\d+\. /.test(t))     return 'ol';
     return 'p';
   }
   return 'p';
@@ -309,13 +310,14 @@ function applyBodyBlockType(body, newType) {
     const t = line.trim();
     if (!t || /^(!|\{\{|:audio:|:ATTRIB:|:AI:|\+\+|\|\||:[a-zA-Z])/.test(t)) return line;
     applied = true;
-    const content = t.replace(/^#{1,5} /, '').replace(/^- /, '');
+    const content = t.replace(/^#{1,5} /, '').replace(/^- /, '').replace(/^\d+\. /, '');
     if (newType === 'h1') return '# '    + content;
     if (newType === 'h2') return '## '   + content;
     if (newType === 'h3') return '### '  + content;
     if (newType === 'h4') return '#### ' + content;
     if (newType === 'h5') return '##### '+ content;
     if (newType === 'ul') return '- '    + content;
+    if (newType === 'ol') return '1. '   + content;
     return content;
   }).join('\n');
 }
@@ -347,7 +349,7 @@ function renderBodyPreview(body) {
   }
 
   function isBlock(line) {
-    return line.startsWith('- ') || /^#{1,3} /.test(line) || line.startsWith('> ');
+    return line.startsWith('- ') || /^#{1,3} /.test(line) || line.startsWith('> ') || /^\d+\. /.test(line);
   }
 
   var lines = [];
@@ -398,6 +400,16 @@ function renderBodyPreview(body) {
         i++;
       }
       if (items) out += '<div class="canvas-ul">' + items + '</div>';
+    } else if (/^\d+\. /.test(line)) {
+      var olItems = '';
+      var olNum = 1;
+      while (i < lines.length && /^\d+\. /.test(lines[i])) {
+        content = renderInline(lines[i].replace(/^\d+\. /, ''));
+        if (content) olItems += '<div class="canvas-li">' + olNum + '. ' + content + '</div>';
+        olNum++;
+        i++;
+      }
+      if (olItems) out += '<div class="canvas-ul">' + olItems + '</div>';
     } else if (line.startsWith('> ')) {
       var bqParts = [];
       var bqc = renderInline(line.slice(2).replace(/  $/, ''));
