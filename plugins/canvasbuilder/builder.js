@@ -204,13 +204,19 @@ export function getBuilderExtensions(ctx = {}) {
             sel.removeAllRanges();
             sel.addRange(_notesSelRange);
             if (!sel.isCollapsed) {
-              document.execCommand('foreColor', false, hex);
+              if (hex === null) {
+                _stripSelectionColor();
+              } else {
+                document.execCommand('foreColor', false, hex);
+              }
               _syncNotes();
             }
           } else {
-            setBlockStyleProp('color', hex);
+            const resetColor = '#ffffff';
+            const appliedColor = hex === null ? resetColor : hex;
+            setBlockStyleProp('color', appliedColor);
             const swatch = colorBtn.querySelector('.insp-color-swatch');
-            if (swatch) swatch.style.background = hex;
+            if (swatch) swatch.style.background = appliedColor;
             syncInspector();
           }
           colorMenu.hidden = true;
@@ -627,6 +633,30 @@ function setupInspectorResize() {
   });
 }
 
+function _stripSelectionColor() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return;
+  const ancestor = range.commonAncestorContainer;
+  const scanRoot = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
+
+  function uncolor(el) {
+    if (!(el instanceof Element)) return;
+    if (el.tagName === 'FONT' && el.hasAttribute('color')) el.removeAttribute('color');
+    else if (el.tagName === 'SPAN' && el.style && el.style.color) el.style.removeProperty('color');
+  }
+
+  // The commonAncestorContainer itself may be the colored element — TreeWalker skips the root.
+  uncolor(scanRoot);
+
+  const walker = document.createTreeWalker(scanRoot, NodeFilter.SHOW_ELEMENT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (range.intersectsNode(node)) uncolor(node);
+  }
+}
+
 function _buildXcpMenu(onPick) {
   const THEME = [
     // Row 1: 40% tint
@@ -641,6 +671,19 @@ function _buildXcpMenu(onPick) {
   ];
 
   const frag = document.createDocumentFragment();
+
+  const defaultBtn = document.createElement('button');
+  defaultBtn.type = 'button';
+  defaultBtn.className = 'xcp-default-btn';
+  defaultBtn.title = 'Remove color formatting (inherits default)';
+  defaultBtn.innerHTML = '<span class="xcp-default-icon"></span>Default Color';
+  defaultBtn.addEventListener('mousedown', e => e.preventDefault());
+  defaultBtn.addEventListener('click', () => onPick(null));
+  frag.appendChild(defaultBtn);
+
+  const topDivider = document.createElement('div');
+  topDivider.className = 'xcp-divider';
+  frag.appendChild(topDivider);
 
   const themeLabel = document.createElement('div');
   themeLabel.className = 'xcp-section-label';

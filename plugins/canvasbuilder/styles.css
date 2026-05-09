@@ -488,6 +488,19 @@
 }
 .xcp-swatch--std { border-radius: 2px; }
 .xcp-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 8px 0 3px; }
+.xcp-default-btn {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; background: none; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px; color: #c0cde8; font-size: 11px; cursor: pointer;
+  padding: 4px 6px; margin-bottom: 0; text-align: left;
+}
+.xcp-default-btn:hover { background: rgba(255,255,255,0.07); color: #e0ecff; }
+.xcp-default-icon {
+  display: inline-block; width: 14px; height: 14px;
+  border: 1px solid rgba(255,255,255,0.4); border-radius: 2px;
+  background: linear-gradient(135deg, #fff 49%, #e55 49%, #e55 51%, #fff 51%);
+  flex-shrink: 0;
+}
 .xcp-more-btn {
   display: flex; align-items: center; gap: 6px;
   width: 100%; background: none; border: none;
