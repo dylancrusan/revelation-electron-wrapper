@@ -21,9 +21,10 @@ function inlineMarkdown(text) {
   return text;
 }
 
-// Returns the hex color if the entire content is wrapped in {#color:...}, else null.
+// Returns the hex color if the entire content is a single {#color:...} span, else null.
+// Uses [^}]+ so it does NOT match items with multiple color spans like {#aaa:X}{#bbb:Y}.
 function getWrappedColor(content) {
-  const m = content.match(/^\{(#[0-9a-fA-F]{3,6}):(.+)\}$/s);
+  const m = content.match(/^\{(#[0-9a-fA-F]{3,6}):([^}]+)\}$/);
   return m ? m[1] : null;
 }
 

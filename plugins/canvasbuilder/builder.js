@@ -36,10 +36,11 @@ export function getBuilderExtensions(ctx = {}) {
   const mdFile = String(ctx.mdFile || '').trim();
 
   // Shared state for context-aware inspector color picker and list buttons
-  let _notesSelRange     = null;
-  let _bulletSelRange    = null;
-  let _numberSelRange    = null;
-  let _syncNotes         = null;
+  let _notesSelRange          = null;
+  let _bulletSelRange         = null;
+  let _numberSelRange         = null;
+  let _syncNotes              = null;
+  let _loadNotesFromMarkdown  = null;
 
   // ── Canvas panel ───────────────────────────────────────────────────────────
   const canvasPanel = document.getElementById('canvas-editor-panel');
@@ -206,10 +207,12 @@ export function getBuilderExtensions(ctx = {}) {
             if (!sel.isCollapsed) {
               if (hex === null) {
                 _stripSelectionColor();
+                _syncNotes();
+                if (_loadNotesFromMarkdown) requestAnimationFrame(_loadNotesFromMarkdown);
               } else {
                 document.execCommand('foreColor', false, hex);
+                _syncNotes();
               }
-              _syncNotes();
             }
           } else {
             const resetColor = '#ffffff';
@@ -411,6 +414,7 @@ export function getBuilderExtensions(ctx = {}) {
       notesRendered.innerHTML = md ? renderNotes(notesEditor.value) : '';
       notesRendered.classList.toggle('is-empty', !md);
     }
+    _loadNotesFromMarkdown = loadFromMarkdown;
 
     loadFromMarkdown();
 
