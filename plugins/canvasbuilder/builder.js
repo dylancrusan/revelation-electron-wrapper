@@ -208,7 +208,6 @@ export function getBuilderExtensions(ctx = {}) {
               if (hex === null) {
                 _stripSelectionColor();
                 _syncNotes();
-                if (_loadNotesFromMarkdown) requestAnimationFrame(_loadNotesFromMarkdown);
               } else {
                 document.execCommand('foreColor', false, hex);
                 _syncNotes();
@@ -640,25 +639,25 @@ function setupInspectorResize() {
 function _stripSelectionColor() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  if (range.collapsed) return;
-  const ancestor = range.commonAncestorContainer;
-  const scanRoot = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor;
+  if (sel.isCollapsed) return;
 
-  function uncolor(el) {
-    if (!(el instanceof Element)) return;
-    if (el.tagName === 'FONT' && el.hasAttribute('color')) el.removeAttribute('color');
-    else if (el.tagName === 'SPAN' && el.style && el.style.color) el.style.removeProperty('color');
-  }
+  // Apply a sentinel color via execCommand — this makes the browser automatically
+  // split any partially-overlapping color spans at the selection boundaries.
+  // We then remove only the sentinel-colored elements, leaving adjacent colors intact.
+  const SENTINEL = '#010203';
+  document.execCommand('foreColor', false, SENTINEL);
 
-  // The commonAncestorContainer itself may be the colored element — TreeWalker skips the root.
-  uncolor(scanRoot);
-
-  const walker = document.createTreeWalker(scanRoot, NodeFilter.SHOW_ELEMENT, null);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (range.intersectsNode(node)) uncolor(node);
-  }
+  const container = document.getElementById('notes-rendered');
+  if (!container) return;
+  container.querySelectorAll('font, span').forEach(el => {
+    const raw = (el.tagName === 'FONT' ? el.getAttribute('color') : null)
+      || (el.style && el.style.color) || '';
+    const norm = raw.replace(/\s/g, '').toLowerCase();
+    if (norm === SENTINEL || norm === 'rgb(1,2,3)') {
+      if (el.tagName === 'FONT') el.removeAttribute('color');
+      else el.style.removeProperty('color');
+    }
+  });
 }
 
 function _buildXcpMenu(onPick) {
