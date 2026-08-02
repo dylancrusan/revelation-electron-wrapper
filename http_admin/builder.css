@@ -698,30 +698,6 @@ body.is-column-md-mode .column-markdown-panel {
   align-items: center;
 }
 
-.insp-color {
-  width: 32px;
-  height: 26px;
-  padding: 3px;
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 4px;
-  cursor: pointer;
-  background: rgba(20,23,32,0.75);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.insp-color:hover { border-color: rgba(255,255,255,0.3); }
-.insp-color-swatch {
-  width: 22px;
-  height: 14px;
-  border-radius: 2px;
-  border: 1px solid rgba(255,255,255,0.2);
-  background: #ffffff;
-  display: block;
-  pointer-events: none;
-}
-
 .insp-fmt-btn {
   background: rgba(20,23,32,0.75);
   border: 1px solid rgba(255,255,255,0.10);
@@ -792,6 +768,25 @@ body.is-column-md-mode .column-markdown-panel {
   min-width: 224px !important;
   padding: 8px !important;
   gap: 0 !important;
+}
+/* Inline variant — always-visible picker embedded in the inspector, not a floating popup */
+#insp-color-menu.xcp-inline {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  box-shadow: none;
+  z-index: auto;
+  min-width: 0 !important;
+  padding: 10px 0 0 !important;
+  margin-top: 8px;
+}
+#insp-color-menu.xcp-inline .xcp-divider {
+  background: transparent;
 }
 .xcp-section-label {
   font-size: 10px;

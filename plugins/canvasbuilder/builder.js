@@ -88,13 +88,6 @@ export function getBuilderExtensions(ctx = {}) {
     const sizeSel = document.getElementById('insp-size-select');
     if (sizeSel) sizeSel.value = style.size || '';
 
-    // Color swatch
-    const colorBtn = document.getElementById('insp-color-btn');
-    if (colorBtn) {
-      const swatch = colorBtn.querySelector('.insp-color-swatch');
-      if (swatch) swatch.style.background = style.color || '#ffffff';
-    }
-
     // Bold / italic / underline
     const boldBtn      = document.getElementById('insp-bold-btn');
     const italicBtn    = document.getElementById('insp-italic-btn');
@@ -180,11 +173,11 @@ export function getBuilderExtensions(ctx = {}) {
     });
   }
 
-  // Color — xcp palette, context-aware (canvas text or notes text)
-  const colorBtn  = document.getElementById('insp-color-btn');
+  // Color — xcp palette, always visible inline, context-aware (canvas text or notes text)
   const colorMenu = document.getElementById('insp-color-menu');
-  if (colorBtn && colorMenu) {
-    colorBtn.addEventListener('mousedown', () => {
+  if (colorMenu) {
+    // Capture any active notes selection before a swatch click steals focus
+    colorMenu.addEventListener('mousedown', () => {
       const notesEl = document.getElementById('notes-rendered');
       const sel = window.getSelection();
       if (notesEl && sel && sel.rangeCount > 0 && notesEl.contains(sel.anchorNode)) {
@@ -194,44 +187,29 @@ export function getBuilderExtensions(ctx = {}) {
       }
     });
 
-    colorBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (!colorMenu.hasChildNodes()) {
-        colorMenu.appendChild(_buildXcpMenu(hex => {
-          const notesEl = document.getElementById('notes-rendered');
-          if (_notesSelRange && notesEl && _syncNotes) {
-            notesEl.focus();
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(_notesSelRange);
-            if (!sel.isCollapsed) {
-              if (hex === null) {
-                _stripSelectionColor();
-                _syncNotes();
-              } else {
-                document.execCommand('foreColor', false, hex);
-                _syncNotes();
-              }
-            }
+    colorMenu.appendChild(_buildXcpMenu(hex => {
+      const notesEl = document.getElementById('notes-rendered');
+      if (_notesSelRange && notesEl && _syncNotes) {
+        notesEl.focus();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_notesSelRange);
+        if (!sel.isCollapsed) {
+          if (hex === null) {
+            _stripSelectionColor();
+            _syncNotes();
           } else {
-            const resetColor = '#ffffff';
-            const appliedColor = hex === null ? resetColor : hex;
-            setBlockStyleProp('color', appliedColor);
-            const swatch = colorBtn.querySelector('.insp-color-swatch');
-            if (swatch) swatch.style.background = appliedColor;
-            syncInspector();
+            document.execCommand('foreColor', false, hex);
+            _syncNotes();
           }
-          colorMenu.hidden = true;
-        }));
+        }
+      } else {
+        const resetColor = '#ffffff';
+        const appliedColor = hex === null ? resetColor : hex;
+        setBlockStyleProp('color', appliedColor);
+        syncInspector();
       }
-      colorMenu.hidden = !colorMenu.hidden;
-    });
-
-    document.addEventListener('click', e => {
-      if (!colorBtn.contains(e.target) && !colorMenu.contains(e.target)) {
-        colorMenu.hidden = true;
-      }
-    });
+    }));
   }
 
   // Bold / Italic / Underline
