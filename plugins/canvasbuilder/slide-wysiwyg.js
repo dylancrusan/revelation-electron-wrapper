@@ -19,6 +19,7 @@ function isSlideBodyMacro(line) {
   if (/^:ATTRIB:/i.test(trimmed)) return true;
   if (trimmed === ':AI:') return true;
   if (/^\{\{/.test(trimmed)) return true;
+  if (/^<!--/.test(trimmed)) return true;
   if (/^:[a-zA-Z][a-zA-Z0-9_]*:/.test(trimmed)) return true;
   return false;
 }
@@ -54,6 +55,8 @@ function macroLabel(line) {
   if (/^\{\{attrib/.test(trimmed)) return '\u270D attribution';
   if (/^\{\{ai/.test(trimmed)) return '\uD83E\uDD16 AI';
   if (/^\{\{\}\}/.test(trimmed)) return '\u2716 clear';
+  if (/^<!--\s*canvas_block_/.test(trimmed)) return '\u25a6 block style';
+  if (/^<!--/.test(trimmed)) return '\u2699 comment';
   if (/^:lightbg:/.test(trimmed)) return '\u2600\uFE0F light bg';
   if (/^:darkbg:/.test(trimmed)) return '\uD83C\uDF11 dark bg';
   if (/^:lighttext:/.test(trimmed)) return '\u2600\uFE0F light text';
@@ -73,7 +76,7 @@ function macroLabel(line) {
   return '\u2699 macro';
 }
 
-// Apply bold/italic inline markdown to a text segment.
+// Apply inline markdown (bold/italic/underline/strikethrough/links) to a text segment.
 function inlineMarkdownToHtml(text) {
   const escaped = text
     .replace(/&/g, '&amp;')
@@ -81,10 +84,13 @@ function inlineMarkdownToHtml(text) {
     .replace(/>/g, '&gt;');
   return escaped
     .replace(/\*\*([^*<>]+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*(?!\*)([^*<>]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    .replace(/(?<!\*)\*(?!\*)([^*<>]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+    .replace(/__([^_<>]+?)__/g, '<u>$1</u>')
+    .replace(/~~([^~<>]+?)~~/g, '<s>$1</s>')
+    .replace(/\[([^\]<>]+?)\]\(([^)\s<>]+?)\)/g, '<a href="$2">$1</a>');
 }
 
-// Walk a DOM node tree and convert to markdown, preserving <u> and styled <span> as HTML.
+// Walk a DOM node tree and convert to markdown, preserving styled <span> as HTML.
 function nodeToMarkdown(node) {
   let result = '';
   for (const child of node.childNodes) {
@@ -100,7 +106,12 @@ function nodeToMarkdown(node) {
     } else if (tag === 'em' || tag === 'i') {
       result += `*${inner}*`;
     } else if (tag === 'u') {
-      result += `<u>${inner}</u>`;
+      result += `__${inner}__`;
+    } else if (tag === 's' || tag === 'strike' || tag === 'del') {
+      result += `~~${inner}~~`;
+    } else if (tag === 'a') {
+      const href = child.getAttribute('href') || '';
+      result += `[${inner}](${href})`;
     } else if (tag === 'span') {
       const style = child.getAttribute('style');
       result += style ? `<span style="${style}">${inner}</span>` : inner;
@@ -128,6 +139,7 @@ function bodyToHtml(markdown) {
   const blocks = [];
   let listType = null;
   let listItems = [];
+  let quoteLines = null;
 
   const flushList = () => {
     if (!listType || !listItems.length) return;
@@ -138,9 +150,18 @@ function bodyToHtml(markdown) {
     listItems = [];
   };
 
+  const flushQuote = () => {
+    if (!quoteLines) return;
+    const inner = quoteLines.map((l) => inlineMarkdownToHtml(l)).join('<br>');
+    blocks.push(`<blockquote>${inner}</blockquote>`);
+    quoteLines = null;
+  };
+
+  const flushAll = () => { flushList(); flushQuote(); };
+
   for (const line of lines) {
     if (isSlideBodyMacro(line)) {
-      flushList();
+      flushAll();
       const escaped = line.replace(/"/g, '&quot;');
       const label = macroLabel(line);
       blocks.push(
@@ -153,10 +174,27 @@ function bodyToHtml(markdown) {
     const trimmed = line.trim();
 
     if (!trimmed) {
-      flushList();
+      flushAll();
       blocks.push('<p><br></p>');
       continue;
     }
+
+    const quote = trimmed.match(/^>\s?(.*)$/);
+    if (quote) {
+      if (!quoteLines) { flushList(); quoteLines = []; }
+      quoteLines.push(quote[1]);
+      continue;
+    }
+    flushQuote();
+
+    const h6 = trimmed.match(/^###### (.+)$/);
+    if (h6) { flushList(); blocks.push(`<h6>${inlineMarkdownToHtml(h6[1])}</h6>`); continue; }
+
+    const h5 = trimmed.match(/^##### (.+)$/);
+    if (h5) { flushList(); blocks.push(`<h5>${inlineMarkdownToHtml(h5[1])}</h5>`); continue; }
+
+    const h4 = trimmed.match(/^#### (.+)$/);
+    if (h4) { flushList(); blocks.push(`<h4>${inlineMarkdownToHtml(h4[1])}</h4>`); continue; }
 
     const h3 = trimmed.match(/^### (.+)$/);
     if (h3) { flushList(); blocks.push(`<h3>${inlineMarkdownToHtml(h3[1])}</h3>`); continue; }
@@ -181,11 +219,20 @@ function bodyToHtml(markdown) {
       continue;
     }
 
+    // Verse/reference syntax: a whole line wrapped in single underscores
+    // (double-underscore __underline__ is excluded via the lookaround guards).
+    const verseRef = trimmed.match(/^_(?!_)(.+?)(?<!_)_$/);
+    if (verseRef) {
+      flushList();
+      blocks.push(`<p class="slide-wysiwyg-verse-ref">${inlineMarkdownToHtml(verseRef[1])}</p>`);
+      continue;
+    }
+
     flushList();
     blocks.push(`<p>${inlineMarkdownToHtml(trimmed)}</p>`);
   }
 
-  flushList();
+  flushAll();
   return blocks.join('');
 }
 
@@ -218,6 +265,20 @@ function htmlToBody(html) {
     if (tag === 'h1') { lines.push(`# ${extractInline(el)}`); continue; }
     if (tag === 'h2') { lines.push(`## ${extractInline(el)}`); continue; }
     if (tag === 'h3') { lines.push(`### ${extractInline(el)}`); continue; }
+    if (tag === 'h4') { lines.push(`#### ${extractInline(el)}`); continue; }
+    if (tag === 'h5') { lines.push(`##### ${extractInline(el)}`); continue; }
+    if (tag === 'h6') { lines.push(`###### ${extractInline(el)}`); continue; }
+
+    if (tag === 'blockquote') {
+      const inner = extractInline(el);
+      for (const quoteLine of inner.split('\n')) lines.push(`> ${quoteLine}`);
+      continue;
+    }
+
+    if (tag === 'p' && el.classList.contains('slide-wysiwyg-verse-ref')) {
+      lines.push(`_${extractInline(el)}_`);
+      continue;
+    }
 
     if (tag === 'ul') {
       for (const li of el.querySelectorAll(':scope > li')) {

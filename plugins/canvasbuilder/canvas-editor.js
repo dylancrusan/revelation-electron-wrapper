@@ -148,38 +148,102 @@ function updateCanvasScale(stageEl) {
   if (w > 0) el.style.fontSize = (w / 1920 * 100) + 'px';
 }
 
-function parseBlockStyle(top) {
-  const defaults = { zone: 'center', color: '#ffffff', font: '', size: '', align: 'center', bold: false, italic: false, underline: false };
-  const m = (top || '').match(/\{\{canvas_block_1:([^}]+)\}\}/);
-  if (!m) return defaults;
-  const out = Object.assign({}, defaults);
-  m[1].split(',').forEach(function(pair) {
+// Per-block style: styling metadata for one canvas text block, stored as an
+// inline `<!-- canvas_block_N: key=val,... -->` marker line at the start of
+// the block's own content within slide.body. HTML comments (not a {{macro}})
+// are used deliberately: the real slide renderer doesn't understand this
+// marker yet, and unlike {{...}} macros, an unrecognized HTML comment is
+// always invisible in the compiled output rather than leaking as literal
+// text. A slide with no marker at all is treated as a single implicit block
+// (id 1, default style) — this is what keeps every existing single-block
+// presentation byte-for-byte unchanged.
+const BLOCK_STYLE_DEFAULTS = Object.freeze({
+  zone: 'center', color: '#ffffff', font: '', size: '', align: 'center',
+  bold: false, italic: false, underline: false, boxBg: '', boxBorder: ''
+});
+
+function parseBlockStyleArgs(argsStr) {
+  const out = Object.assign({}, BLOCK_STYLE_DEFAULTS);
+  (argsStr || '').split(',').forEach(function(pair) {
     const eq = pair.indexOf('=');
     if (eq < 0) return;
     const k = pair.slice(0, eq).trim();
     const v = pair.slice(eq + 1).trim();
     if (k === 'bold' || k === 'italic' || k === 'underline') out[k] = v === '1';
-    else out[k] = v;
+    else if (k === 'box-bg') out.boxBg = v;
+    else if (k === 'box-border') out.boxBorder = v;
+    else if (k in out) out[k] = v;
   });
   return out;
 }
 
-function serializeBlockStyle(style, top) {
-  const macro = '{{canvas_block_1:zone=' + (style.zone || 'center') +
+function serializeBlockStyleArgs(style) {
+  let s = 'zone=' + (style.zone || 'center') +
     ',color=' + (style.color || '#ffffff') +
     ',font=' + (style.font || '') +
     ',size=' + (style.size || '') +
     ',align=' + (style.align || 'center') +
     ',bold=' + (style.bold ? '1' : '0') +
     ',italic=' + (style.italic ? '1' : '0') +
-    ',underline=' + (style.underline ? '1' : '0') + '}}';
-  const cleaned = (top || '').replace(/\{\{canvas_block_1:[^}]+\}\}\n?/g, '').trimEnd();
-  return cleaned ? cleaned + '\n' + macro : macro;
+    ',underline=' + (style.underline ? '1' : '0');
+  if (style.boxBg) s += ',box-bg=' + style.boxBg;
+  if (style.boxBorder) s += ',box-border=' + style.boxBorder;
+  return s;
+}
+
+function trimBlankEdges(lines) {
+  const out = lines.slice();
+  while (out.length && !out[0].trim()) out.shift();
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  return out;
+}
+
+// Split slide body into an ordered list of blocks at inline
+// <!-- canvas_block_N: ... --> marker lines. No markers → one implicit block.
+function parseBodyBlocks(body) {
+  const markerRe = /^<!--\s*canvas_block_(\d+):\s*(.*?)\s*-->$/;
+  const lines = (body || '').split(/\r?\n/);
+  const blocks = [];
+  let current = null;
+
+  const startBlock = (id, style, explicit) => {
+    current = { id, style, explicit, lines: [] };
+    blocks.push(current);
+  };
+
+  for (const line of lines) {
+    const m = line.trim().match(markerRe);
+    if (m) {
+      startBlock(Number(m[1]), parseBlockStyleArgs(m[2]), true);
+      continue;
+    }
+    if (!current) startBlock(1, Object.assign({}, BLOCK_STYLE_DEFAULTS), false);
+    current.lines.push(line);
+  }
+  if (!blocks.length) startBlock(1, Object.assign({}, BLOCK_STYLE_DEFAULTS), false);
+
+  return blocks.map((b) => ({
+    id: b.id,
+    style: b.style,
+    explicit: b.explicit,
+    content: trimBlankEdges(b.lines).join('\n')
+  }));
+}
+
+// Reassemble parsed blocks back into a slide body string. Blocks without an
+// explicit style (never touched by the inspector) serialize as plain
+// content with no marker, so untouched slides round-trip byte-for-byte.
+function serializeBodyBlocks(blocks) {
+  return blocks.map((b) => {
+    if (!b.explicit) return b.content;
+    const marker = '<!-- canvas_block_' + b.id + ': ' + serializeBlockStyleArgs(b.style) + ' -->';
+    return b.content ? marker + '\n' + b.content : marker;
+  }).join('\n\n').trim();
 }
 
 function getBlockStyle() {
   const slide = getCurrentSlide();
-  return parseBlockStyle(slide ? slide.top : null);
+  return parseBodyBlocks(slide ? slide.body : '')[0].style;
 }
 
 function setBlockStyleProp(key, value) {
@@ -200,14 +264,16 @@ function setBlockStyleProp(key, value) {
     return;
   }
 
-  const style = parseBlockStyle(slide.top);
-  style[key] = value;
-  if (!style.zone || style.zone === 'center') {
+  const blocks = parseBodyBlocks(slide.body);
+  const block = blocks[0];
+  block.style = Object.assign({}, block.style, { [key]: value });
+  block.explicit = true;
+  if (!block.style.zone || block.style.zone === 'center') {
     const zoneFromLayout = parseLayoutId(slide.top);
-    if (zoneFromLayout) style.zone = zoneFromLayout;
+    if (zoneFromLayout) block.style.zone = zoneFromLayout;
   }
-  const newTop = serializeBlockStyle(style, slide.top);
-  mutateCurrentSlide('Update block style', () => ({ top: newTop }));
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Update block style', () => ({ body: newBody }));
   renderCanvas();
 }
 
@@ -249,10 +315,14 @@ function applyLayout(zoneId) {
   if (!zone) return;
   let top = stripLayoutMacros(slide.top || '');
   if (zone.macro) top = top ? top + '\n' + zone.macro : zone.macro;
-  const blockStyle = parseBlockStyle(top);
-  blockStyle.zone = zoneId;
-  top = serializeBlockStyle(blockStyle, top);
-  mutateCurrentSlide('Apply layout', () => ({ top }));
+
+  const blocks = parseBodyBlocks(slide.body);
+  const block = blocks[0];
+  block.style = Object.assign({}, block.style, { zone: zoneId });
+  block.explicit = true;
+  const newBody = serializeBodyBlocks(blocks);
+
+  mutateCurrentSlide('Apply layout', () => ({ top, body: newBody }));
   renderCanvas();
 }
 
@@ -270,7 +340,8 @@ function detectBodyBlockType(body) {
   const lines = (body || '').split('\n');
   for (const line of lines) {
     const t = line.trim();
-    if (!t || /^(!|\{\{|:audio:|:ATTRIB:|:AI:|\+\+|\|\||:[a-zA-Z])/.test(t)) continue;
+    if (!t || /^(!|\{\{|<!--|:audio:|:ATTRIB:|:AI:|\+\+|\|\||:[a-zA-Z])/.test(t)) continue;
+    if (t.startsWith('###### ')) return 'h6';
     if (t.startsWith('##### ')) return 'h5';
     if (t.startsWith('#### '))  return 'h4';
     if (t.startsWith('### '))   return 'h3';
@@ -278,6 +349,8 @@ function detectBodyBlockType(body) {
     if (t.startsWith('# '))     return 'h1';
     if (t.startsWith('- '))     return 'ul';
     if (/^\d+\. /.test(t))     return 'ol';
+    if (t.startsWith('> '))    return 'quote';
+    if (/^_(?!_)(.+?)(?<!_)_$/.test(t)) return 'ref';
     return 'p';
   }
   return 'p';
@@ -308,16 +381,24 @@ function applyBodyBlockType(body, newType) {
   return lines.map(function(line) {
     if (applied) return line;
     const t = line.trim();
-    if (!t || /^(!|\{\{|:audio:|:ATTRIB:|:AI:|\+\+|\|\||:[a-zA-Z])/.test(t)) return line;
+    if (!t || /^(!|\{\{|<!--|:audio:|:ATTRIB:|:AI:|\+\+|\|\||:[a-zA-Z])/.test(t)) return line;
     applied = true;
-    const content = t.replace(/^#{1,5} /, '').replace(/^- /, '').replace(/^\d+\. /, '');
-    if (newType === 'h1') return '# '    + content;
-    if (newType === 'h2') return '## '   + content;
-    if (newType === 'h3') return '### '  + content;
-    if (newType === 'h4') return '#### ' + content;
-    if (newType === 'h5') return '##### '+ content;
-    if (newType === 'ul') return '- '    + content;
-    if (newType === 'ol') return '1. '   + content;
+    const content = t
+      .replace(/^#{1,6} /, '')
+      .replace(/^- /, '')
+      .replace(/^\d+\. /, '')
+      .replace(/^> /, '')
+      .replace(/^_(?!_)(.+?)(?<!_)_$/, '$1');
+    if (newType === 'h1') return '# '     + content;
+    if (newType === 'h2') return '## '    + content;
+    if (newType === 'h3') return '### '   + content;
+    if (newType === 'h4') return '#### '  + content;
+    if (newType === 'h5') return '##### ' + content;
+    if (newType === 'h6') return '###### ' + content;
+    if (newType === 'ul') return '- '     + content;
+    if (newType === 'ol') return '1. '    + content;
+    if (newType === 'quote') return '> '  + content;
+    if (newType === 'ref') return '_' + content + '_';
     return content;
   }).join('\n');
 }
@@ -349,7 +430,7 @@ function renderBodyPreview(body) {
   }
 
   function isBlock(line) {
-    return line.startsWith('- ') || /^#{1,3} /.test(line) || line.startsWith('> ') || /^\d+\. /.test(line);
+    return line.startsWith('- ') || /^#{1,6} /.test(line) || line.startsWith('> ') || /^\d+\. /.test(line);
   }
 
   var lines = [];
@@ -391,6 +472,18 @@ function renderBodyPreview(body) {
     } else if (line.startsWith('### ')) {
       content = renderInline(line.slice(4));
       if (content) out += '<div class="canvas-h3">' + content + '</div>';
+      i++;
+    } else if (line.startsWith('#### ')) {
+      content = renderInline(line.slice(5));
+      if (content) out += '<div class="canvas-h4">' + content + '</div>';
+      i++;
+    } else if (line.startsWith('##### ')) {
+      content = renderInline(line.slice(6));
+      if (content) out += '<div class="canvas-h5">' + content + '</div>';
+      i++;
+    } else if (line.startsWith('###### ')) {
+      content = renderInline(line.slice(7));
+      if (content) out += '<div class="canvas-h6">' + content + '</div>';
       i++;
     } else if (line.startsWith('- ')) {
       var items = '';

@@ -180,6 +180,7 @@ function renderThumbTextOverlay(body, isDark, zone, textColorOverride) {
     var trimmed = line.trim();
     if (!trimmed) continue;
     if (/^\{\{/.test(trimmed)) continue;
+    if (/^<!--/.test(trimmed)) continue;
     if (/^!\[/.test(trimmed)) continue;
     if (/^:\w.*:\s*$/.test(trimmed)) continue;
     contentLines.push(trimmed);
@@ -229,10 +230,10 @@ function renderThumbTextOverlay(body, isDark, zone, textColorOverride) {
       var cl = lines[j];
       if (cl === '||') continue;
       var el = document.createElement('div');
-      var headingMatch = cl.match(/^(#{1,3})\s/);
+      var headingMatch = cl.match(/^(#{1,6})\s/);
       if (headingMatch) {
         var level = headingMatch[1].length;
-        var sz = level === 1 ? '10px' : level === 2 ? '9px' : '8px';
+        var sz = level === 1 ? '10px' : level === 2 ? '9px' : level === 3 ? '8px' : '7px';
         el.textContent = stripInline(cl.replace(/^#+\s*/, ''));
         el.style.cssText = 'font:bold ' + sz + '/1.2 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
       } else if (/^[-*+]\s/.test(cl) || /^\d+\.\s/.test(cl)) {
@@ -575,9 +576,12 @@ function parseSlideBg(top) {
   return result;
 }
 
-function parseCanvasBlock1(top) {
-  const s = String(top || '');
-  const match = s.match(/\{\{canvas_block_1:([^}]+)\}\}/);
+// canvas_block_1 style metadata now lives as an inline HTML-comment marker in
+// slide.body (see plugins/canvasbuilder/canvas-editor.js parseBodyBlocks), not
+// as a {{...}} macro in slide.top — this must be read from body accordingly.
+function parseCanvasBlock1(body) {
+  const s = String(body || '');
+  const match = s.match(/<!--\s*canvas_block_1:\s*(.*?)\s*-->/);
   if (!match) return {};
   const result = {};
   match[1].split(',').forEach(function(pair) {
@@ -587,7 +591,7 @@ function parseCanvasBlock1(top) {
   return result;
 }
 
-function parseZoneFromTop(top) {
+function parseZoneFromTop(top, canvasBlock) {
   const s = String(top || '');
   if (s.includes('{{upperthird}}')) return 'upperthird';
   if (s.includes('{{lowerthird}}')) return 'lowerthird';
@@ -597,8 +601,7 @@ function parseZoneFromTop(top) {
   if (s.includes('{{topright}}')) return 'topright';
   if (s.includes('{{bottomleft}}')) return 'bottomleft';
   if (s.includes('{{bottomright}}')) return 'bottomright';
-  const blockZone = s.match(/\{\{canvas_block_1:[^}]*?zone=([^,}]+)/);
-  if (blockZone) return blockZone[1].trim();
+  if (canvasBlock && canvasBlock.zone) return canvasBlock.zone;
   return 'center';
 }
 
@@ -609,8 +612,8 @@ function createSlideThumb(slide, host, rendererCtx, h, v, fallbackBg) {
   const ownBg = parseSlideBg(top);
   const bg = { image: ownBg.image || (fallbackBg?.image ?? null), tint: ownBg.tint };
   const isDark = top.includes('{{darkbg}}');
-  const zone = parseZoneFromTop(top);
-  const canvasBlock = parseCanvasBlock1(top);
+  const canvasBlock = parseCanvasBlock1(body);
+  const zone = parseZoneFromTop(top, canvasBlock);
 
   const wrap = document.createElement('div');
   wrap.dataset.slideThumbWrap = '1';
