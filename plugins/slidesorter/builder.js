@@ -169,8 +169,106 @@ let slideSorterInitialized = false;
 // Renders slide body markdown as a lightweight CSS overlay on the thumbnail.
 // Much more reliable than iframes for many simultaneous thumbnails.
 
-function renderThumbTextOverlay(body, isDark, zone, textColorOverride) {
-  var rawLines = String(body || '').split(/\r?\n/);
+// Anchor points (% of stage) for the 9 preset zones — mirrors LAYOUT_ZONES'
+// ax/ay in plugins/canvasbuilder/canvas-editor.js. Plugins in this app don't
+// share modules with each other, so this is a deliberate, small duplicate
+// rather than a cross-plugin import; keep it in sync if that table changes.
+var THUMB_ZONE_ANCHORS = {
+  center:      { x: 50, y: 50 },
+  upperthird:  { x: 50, y: 22 },
+  lowerthird:  { x: 50, y: 78 },
+  shiftright:  { x: 72, y: 50 },
+  shiftleft:   { x: 28, y: 50 },
+  topleft:     { x: 28, y: 22 },
+  topright:    { x: 72, y: 22 },
+  bottomleft:  { x: 28, y: 78 },
+  bottomright: { x: 72, y: 78 }
+};
+
+// Lightweight, read-only mirror of parseBodyBlocks in
+// plugins/canvasbuilder/canvas-editor.js — splits body into blocks at
+// <!-- canvas_block_N: ... --> markers. No markers means one implicit
+// block (id 1), matching that file's own back-compat rule.
+function parseBodyBlocksForThumb(body) {
+  var markerRe = /^<!--\s*canvas_block_(\d+):\s*(.*?)\s*-->$/;
+  var lines = String(body || '').split(/\r?\n/);
+  var blocks = [];
+  var current = null;
+  function startBlock(id, argsStr, explicit) {
+    var args = {};
+    (argsStr || '').split(',').forEach(function(pair) {
+      var eq = pair.indexOf('=');
+      if (eq >= 0) args[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    });
+    current = { id: id, args: args, explicit: explicit, lines: [] };
+    blocks.push(current);
+  }
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].trim().match(markerRe);
+    if (m) { startBlock(Number(m[1]), m[2], true); continue; }
+    if (!current) startBlock(1, '', false);
+    current.lines.push(lines[i]);
+  }
+  if (!blocks.length) startBlock(1, '', false);
+  return blocks.map(function(b) {
+    return { id: b.id, args: b.args, explicit: b.explicit, content: b.lines.join('\n') };
+  });
+}
+
+// Mirrors resolveBlockZone + LAYOUT_ZONES ax/ay lookup in canvas-editor.js:
+// explicit x/y wins; otherwise block 1 falls back to the legacy top-matter
+// zone macro, everything else defaults to center.
+function resolveThumbBlockPosition(block, top) {
+  var x = parseFloat(block.args.x);
+  var y = parseFloat(block.args.y);
+  if (block.args.x !== '' && block.args.x != null && block.args.y !== '' && block.args.y != null &&
+      Number.isFinite(x) && Number.isFinite(y)) {
+    return { x: x, y: y };
+  }
+  var zoneId = (block.explicit && block.args.zone) ? block.args.zone
+    : (block.id === 1 ? parseZoneFromTop(top, {}) : 'center');
+  return THUMB_ZONE_ANCHORS[zoneId] || THUMB_ZONE_ANCHORS.center;
+}
+
+function thumbStripInline(s) {
+  return s
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1');
+}
+
+function thumbRenderLines(lines, maxCount, parentEl, textColor, shadow) {
+  var shown = 0;
+  for (var j = 0; j < lines.length && shown < maxCount; j++) {
+    var cl = lines[j];
+    if (cl === '||') continue;
+    var el = document.createElement('div');
+    var headingMatch = cl.match(/^(#{1,6})\s/);
+    if (headingMatch) {
+      var level = headingMatch[1].length;
+      var sz = level === 1 ? '10px' : level === 2 ? '9px' : level === 3 ? '8px' : '7px';
+      el.textContent = thumbStripInline(cl.replace(/^#+\s*/, ''));
+      el.style.cssText = 'font:bold ' + sz + '/1.2 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    } else if (/^[-*+]\s/.test(cl) || /^\d+\.\s/.test(cl)) {
+      el.textContent = '• ' + thumbStripInline(cl.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, ''));
+      el.style.cssText = 'font:7px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;';
+    } else if (/^>/.test(cl)) {
+      el.textContent = thumbStripInline(cl.replace(/^>\s*/, ''));
+      el.style.cssText = 'font:italic 7.5px/1.3 sans-serif;color:' + textColor + ';opacity:0.9;text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    } else {
+      el.textContent = thumbStripInline(cl);
+      el.style.cssText = 'font:7.5px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    }
+    parentEl.appendChild(el);
+    shown++;
+  }
+  return shown;
+}
+
+function thumbContentLinesFor(rawBody) {
+  var rawLines = String(rawBody || '').split(/\r?\n/);
   var contentLines = [];
   var inNote = false;
   for (var i = 0; i < rawLines.length; i++) {
@@ -185,101 +283,68 @@ function renderThumbTextOverlay(body, isDark, zone, textColorOverride) {
     if (/^:\w.*:\s*$/.test(trimmed)) continue;
     contentLines.push(trimmed);
   }
-  if (!contentLines.length) return null;
+  return contentLines;
+}
 
-  var textColor = textColorOverride || (isDark ? '#fff' : '#111');
-  var shadow = isDark ? '0 1px 4px rgba(0,0,0,0.95)' : '0 1px 2px rgba(255,255,255,0.8)';
-
-  // Map zone to flex positioning (mirrors layouts.scss and tweaks.js)
-  var justifyContent = 'center';
-  var alignItems = 'center';
-  var padding = '6% 8%';
-  switch (String(zone || '')) {
-    case 'upperthird':  justifyContent = 'flex-start'; break;
-    case 'lowerthird':  justifyContent = 'flex-end';   break;
-    case 'shiftright':  alignItems = 'flex-end';   padding = '6% 4% 6% 30%'; break;
-    case 'shiftleft':   alignItems = 'flex-start'; padding = '6% 30% 6% 4%'; break;
-    case 'topleft':     justifyContent = 'flex-start'; alignItems = 'flex-start'; break;
-    case 'topright':    justifyContent = 'flex-start'; alignItems = 'flex-end';   break;
-    case 'bottomleft':  justifyContent = 'flex-end';   alignItems = 'flex-start'; break;
-    case 'bottomright': justifyContent = 'flex-end';   alignItems = 'flex-end';   break;
-  }
-
+// Renders each canvas_block independently at its own resolved position,
+// mirroring the real per-block layout instead of treating the whole slide
+// body as one piece of text positioned by block 1's zone alone — a slide
+// with several independently-dragged blocks previously had every block's
+// text collapse together at block 1's spot in the thumbnail.
+function renderThumbTextOverlay(body, top, isDark) {
+  var blocks = parseBodyBlocksForThumb(body);
   var overlay = document.createElement('div');
-  overlay.style.cssText = [
-    'position:absolute', 'inset:0',
-    'display:flex', 'flex-direction:column',
-    'justify-content:' + justifyContent,
-    'align-items:' + alignItems,
-    'padding:' + padding, 'box-sizing:border-box',
-    'overflow:hidden', 'z-index:2', 'pointer-events:none', 'gap:1px'
-  ].join(';');
+  overlay.style.cssText = 'position:absolute;inset:0;z-index:2;pointer-events:none;';
+  var any = false;
 
-  function stripInline(s) {
-    return s
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/_([^_\n]+)_/g, '$1')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1');
-  }
+  blocks.forEach(function(block) {
+    var contentLines = thumbContentLinesFor(block.content);
+    if (!contentLines.length) return;
 
-  function renderLines(lines, maxCount, parentEl) {
-    var shown = 0;
-    for (var j = 0; j < lines.length && shown < maxCount; j++) {
-      var cl = lines[j];
-      if (cl === '||') continue;
-      var el = document.createElement('div');
-      var headingMatch = cl.match(/^(#{1,6})\s/);
-      if (headingMatch) {
-        var level = headingMatch[1].length;
-        var sz = level === 1 ? '10px' : level === 2 ? '9px' : level === 3 ? '8px' : '7px';
-        el.textContent = stripInline(cl.replace(/^#+\s*/, ''));
-        el.style.cssText = 'font:bold ' + sz + '/1.2 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      } else if (/^[-*+]\s/.test(cl) || /^\d+\.\s/.test(cl)) {
-        el.textContent = '• ' + stripInline(cl.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, ''));
-        el.style.cssText = 'font:7px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;';
-      } else if (/^>/.test(cl)) {
-        el.textContent = stripInline(cl.replace(/^>\s*/, ''));
-        el.style.cssText = 'font:italic 7.5px/1.3 sans-serif;color:' + textColor + ';opacity:0.9;text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      } else {
-        el.textContent = stripInline(cl);
-        el.style.cssText = 'font:7.5px/1.3 sans-serif;color:' + textColor + ';text-shadow:' + shadow + ';max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    var pos = resolveThumbBlockPosition(block, top);
+    var textColor = block.args.color || (isDark ? '#fff' : '#111');
+    var shadow = isDark ? '0 1px 4px rgba(0,0,0,0.95)' : '0 1px 2px rgba(255,255,255,0.8)';
+
+    var blockEl = document.createElement('div');
+    blockEl.style.cssText = [
+      'position:absolute',
+      'top:' + pos.y + '%',
+      'left:' + pos.x + '%',
+      'transform:translate(-50%,-50%)',
+      'max-width:80%',
+      'display:flex', 'flex-direction:column', 'align-items:center', 'gap:1px'
+    ].join(';');
+
+    // Two-column layout within a block: split at || separator (unrelated to
+    // canvas_block positioning — an older per-slide bullet-list convention).
+    var sepIdx = -1;
+    for (var i = 0; i < contentLines.length; i++) {
+      if (contentLines[i] === '||') { sepIdx = i; break; }
+    }
+    if (sepIdx >= 0) {
+      var leftLines = contentLines.slice(0, sepIdx);
+      var rightLines = contentLines.slice(sepIdx + 1);
+      var twoColWrap = document.createElement('div');
+      twoColWrap.style.cssText = 'display:flex;flex-direction:row;gap:4%;width:100%;';
+      var leftCol = document.createElement('div');
+      leftCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
+      var rightCol = document.createElement('div');
+      rightCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
+      var leftShown = thumbRenderLines(leftLines, 4, leftCol, textColor, shadow);
+      var rightShown = thumbRenderLines(rightLines, 4, rightCol, textColor, shadow);
+      if (leftShown > 0 || rightShown > 0) {
+        twoColWrap.appendChild(leftCol);
+        twoColWrap.appendChild(rightCol);
+        blockEl.appendChild(twoColWrap);
       }
-      parentEl.appendChild(el);
-      shown++;
+    } else {
+      thumbRenderLines(contentLines, blocks.length > 1 ? 2 : 6, blockEl, textColor, shadow);
     }
-    return shown;
-  }
 
-  // Two-column layout: split at || separator
-  var sepIdx = -1;
-  for (var i = 0; i < contentLines.length; i++) {
-    if (contentLines[i] === '||') { sepIdx = i; break; }
-  }
+    if (blockEl.children.length) { overlay.appendChild(blockEl); any = true; }
+  });
 
-  if (sepIdx >= 0) {
-    var leftLines = contentLines.slice(0, sepIdx);
-    var rightLines = contentLines.slice(sepIdx + 1);
-    var twoColWrap = document.createElement('div');
-    twoColWrap.style.cssText = 'display:flex;flex-direction:row;gap:4%;width:100%;';
-    var leftCol = document.createElement('div');
-    leftCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
-    var rightCol = document.createElement('div');
-    rightCol.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;';
-    var leftShown = renderLines(leftLines, 4, leftCol);
-    var rightShown = renderLines(rightLines, 4, rightCol);
-    if (leftShown > 0 || rightShown > 0) {
-      twoColWrap.appendChild(leftCol);
-      twoColWrap.appendChild(rightCol);
-      overlay.appendChild(twoColWrap);
-    }
-  } else {
-    renderLines(contentLines, 6, overlay);
-  }
-
-  if (!overlay.children.length) return null;
-  return overlay;
+  return any ? overlay : null;
 }
 
 const PREVIEW_VIEW_GROUP = 'core-preview-view';
@@ -576,21 +641,6 @@ function parseSlideBg(top) {
   return result;
 }
 
-// canvas_block_1 style metadata now lives as an inline HTML-comment marker in
-// slide.body (see plugins/canvasbuilder/canvas-editor.js parseBodyBlocks), not
-// as a {{...}} macro in slide.top — this must be read from body accordingly.
-function parseCanvasBlock1(body) {
-  const s = String(body || '');
-  const match = s.match(/<!--\s*canvas_block_1:\s*(.*?)\s*-->/);
-  if (!match) return {};
-  const result = {};
-  match[1].split(',').forEach(function(pair) {
-    const eq = pair.indexOf('=');
-    if (eq >= 0) result[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
-  });
-  return result;
-}
-
 function parseZoneFromTop(top, canvasBlock) {
   const s = String(top || '');
   if (s.includes('{{upperthird}}')) return 'upperthird';
@@ -612,8 +662,6 @@ function createSlideThumb(slide, host, rendererCtx, h, v, fallbackBg) {
   const ownBg = parseSlideBg(top);
   const bg = { image: ownBg.image || (fallbackBg?.image ?? null), tint: ownBg.tint };
   const isDark = top.includes('{{darkbg}}');
-  const canvasBlock = parseCanvasBlock1(body);
-  const zone = parseZoneFromTop(top, canvasBlock);
 
   const wrap = document.createElement('div');
   wrap.dataset.slideThumbWrap = '1';
@@ -665,7 +713,7 @@ function createSlideThumb(slide, host, rendererCtx, h, v, fallbackBg) {
   }
 
   // Text content overlay
-  const textOverlay = renderThumbTextOverlay(body, isDark, zone, canvasBlock.color || '');
+  const textOverlay = renderThumbTextOverlay(body, top, isDark);
   if (textOverlay) stage.appendChild(textOverlay);
 
   wrap.appendChild(stage);
