@@ -597,8 +597,10 @@ function parseSlidePreview(slide) {
       return;
     }
     takeCite(line);
-    if (!heading && line.startsWith('#')) {
-      heading = plainText(line.replace(/^#+\s*/, ''));
+    if (line.startsWith('#')) {
+      const headingText = plainText(line.replace(/^#+\s*/, ''));
+      if (!heading) heading = headingText;
+      else if (headingText) textLines.push(headingText);
       return;
     }
     if (line.startsWith('![')) return;
