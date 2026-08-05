@@ -405,6 +405,11 @@ function setBlockStyleProp(key, value) {
   const newBody = serializeBodyBlocks(blocks);
   mutateCurrentSlide('Update block style', () => ({ body: newBody }));
   renderCanvas();
+  // Same live-preview sync applyLayout's moveBlock command gets — the canvas
+  // overlay's own text is fully transparent by design, so without this an
+  // unsaved color/font/size/align/weight/style/decoration/box-fill/box-border
+  // pick has nothing to show in the real rendered text until the next save.
+  sendCanvasCommand('blockStyle', { id: block.id, style: block.style });
 }
 
 function getBodyInfo() {
