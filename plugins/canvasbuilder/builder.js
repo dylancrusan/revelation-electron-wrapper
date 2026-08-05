@@ -212,6 +212,28 @@ export function getBuilderExtensions(ctx = {}) {
     }));
   }
 
+  // Box fill / border — same xcp palette pattern as text color, applied to
+  // the selected block's box-bg/box-border style (Phase 1 data model, Phase 2
+  // real-render support). Fill picks a translucent tint of the chosen color,
+  // matching the app's existing dark/light text-background pill aesthetic;
+  // border applies a fixed 3px solid width, keeping the control to a single
+  // color choice rather than exposing width/style as separate knobs.
+  const boxBgMenu = document.getElementById('insp-boxbg-menu');
+  if (boxBgMenu) {
+    boxBgMenu.appendChild(_buildXcpMenu(hex => {
+      setBlockStyleProp('boxBg', hex === null ? '' : _hexToRgba(hex, 0.65));
+      syncInspector();
+    }));
+  }
+
+  const boxBorderMenu = document.getElementById('insp-boxborder-menu');
+  if (boxBorderMenu) {
+    boxBorderMenu.appendChild(_buildXcpMenu(hex => {
+      setBlockStyleProp('boxBorder', hex === null ? '' : ('3px solid ' + hex));
+      syncInspector();
+    }));
+  }
+
   // Bold / Italic / Underline
   const boldBtn      = document.getElementById('insp-bold-btn');
   const italicBtn    = document.getElementById('insp-italic-btn');
@@ -612,6 +634,13 @@ function setupInspectorResize() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
+}
+
+function _hexToRgba(hex, alpha) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function _stripSelectionColor() {
