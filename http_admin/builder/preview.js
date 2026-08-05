@@ -302,6 +302,18 @@ function cancelPreviewUpdateTimer() {
 
 function schedulePreviewUpdate(delayMs = 400) {
   if (state.columnMarkdownMode) return;
+  // #preview-frame's whole panel is permanently `hidden` in builder.html
+  // ("kept for JS compatibility") now that the canvas builder plugin
+  // provides its own, fully equivalent live preview — nothing ever shows
+  // this iframe. But this function still runs on every edit (called from
+  // ~20 places, including the generic plugin-extension-host hook, so every
+  // canvas builder edit triggers it too), writing __builder_temp.md and
+  // reloading this invisible iframe in the background. That's not just
+  // wasted work: two live-reload iframes racing the dev server's HMR
+  // pipeline on the same save is what was intermittently corrupting the
+  // canvas builder's own (visible) iframe reload. Skip entirely whenever
+  // the canvas builder's iframe is present — it already covers this.
+  if (document.querySelector('.canvas-iframe')) return;
   if (previewTimer) clearTimeout(previewTimer);
   previewTimer = setTimeout(() => {
     updatePreview().catch((err) => {
