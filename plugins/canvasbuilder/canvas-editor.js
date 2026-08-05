@@ -23,6 +23,29 @@ function generateCanvasBridgeToken() {
   return canvasBridgeToken;
 }
 
+function buildPreviewUrl() {
+  const params = new URLSearchParams();
+  params.set('p', _mdFile);
+  params.set('builderPreview', '1');
+  params.set('builderPreviewToken', generateCanvasBridgeToken());
+  params.set('forceControls', '0');
+  // Cache-bust so the preview always re-fetches its module graph fresh
+  // instead of reusing whatever was already loaded/evaluated in the iframe —
+  // needed because reloading is otherwise the only way to pick up a code
+  // change that happened after the iframe first loaded this session.
+  params.set('_r', Date.now().toString(36));
+  return window.location.origin + '/' + _dir + '/' + _slug + '/index.html?' + params.toString();
+}
+
+// Reloads just the preview iframe, not the builder itself — safe to call any
+// time, including with unsaved edits, since none of that state lives in the
+// iframe. Lets a stuck/stale live preview (e.g. after this plugin's code
+// changed mid-session) be recovered without saving or restarting the app.
+function refreshPreviewIframe() {
+  if (!canvasIframeEl) return;
+  canvasIframeEl.src = buildPreviewUrl();
+}
+
 function sendCanvasCommand(command, payload) {
   if (!canvasIframeEl || !canvasIframeEl.contentWindow) return;
   canvasIframeEl.contentWindow.postMessage({
@@ -780,6 +803,7 @@ function renderCanvas() {
         '<button class="canvas-act-btn" type="button" data-action="change-bg">Background</button>' +
         '<button class="canvas-act-btn" type="button" data-action="change-tint">Tint</button>' +
         '<button class="canvas-act-btn canvas-act-remove" type="button" data-action="remove-bg" hidden>Remove Bg</button>' +
+        '<button class="canvas-act-btn" type="button" data-action="refresh-preview" title="Reload the live preview if it looks out of sync">Refresh Preview</button>' +
         '<button class="canvas-act-btn canvas-add-block-btn" type="button" title="Add a new independently-positioned text block">+ Text Block</button>' +
         '<button class="canvas-act-btn canvas-act-danger canvas-delete-block-btn" type="button" title="Delete the selected text block">Delete Block</button>' +
         '<button class="canvas-act-btn canvas-split-line-btn" type="button" hidden title="Move the line at your cursor into its own independently-positioned box">Split Line Into Box</button>' +
@@ -803,13 +827,7 @@ function renderCanvas() {
     canvasIframeEl.sandbox = 'allow-scripts';
     canvasIframeEl.setAttribute('referrerpolicy', 'no-referrer');
     canvasIframeEl.title = 'Slide preview';
-
-    const params = new URLSearchParams();
-    params.set('p', _mdFile);
-    params.set('builderPreview', '1');
-    params.set('builderPreviewToken', generateCanvasBridgeToken());
-    params.set('forceControls', '0');
-    canvasIframeEl.src = window.location.origin + '/' + _dir + '/' + _slug + '/index.html?' + params.toString();
+    canvasIframeEl.src = buildPreviewUrl();
 
     const stage = canvasEl.querySelector('.canvas-stage');
     stage.insertBefore(canvasIframeEl, stage.firstChild);
@@ -898,6 +916,8 @@ function wireStaticEvents(container) {
         document.getElementById('add-top-tint-btn')?.click();
       } else if (action === 'remove-bg') {
         removeBg();
+      } else if (action === 'refresh-preview') {
+        refreshPreviewIframe();
       }
     });
   });
