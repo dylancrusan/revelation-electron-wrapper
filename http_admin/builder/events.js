@@ -40,6 +40,10 @@ import {
   previewSlideBtn,
   previewOverviewBtn,
   saveBtn,
+  editMenuBtn,
+  editMenu,
+  editUndoBtn,
+  editRedoBtn,
   addContentBtn,
   addContentMenu,
   variantMenuBtn,
@@ -120,6 +124,8 @@ import {
   closeVariantMenu,
   openPresentationMenu,
   closePresentationMenu,
+  openEditMenu,
+  closeEditMenu,
   openSlideMenu,
   closeSlideMenu,
   closeTablePicker,
@@ -129,6 +135,7 @@ import {
   handleTablePickerGridMove,
   handleTablePickerCancel
 } from './menus.js';
+import { undo, redo, canUndo, canRedo, onHistoryChange } from './history.js';
 import { openAddContentMenu, closeAddContentMenu, updateAddContentState, loadContentCreators, handleContentInsertStorage, triggerContentCreatorByPlugin } from './content.js';
 import { toggleHideFlagInEditor } from './editor-actions.js';
 import { loadVariantState, openVariantMenu as prepareVariantMenu } from './variants.js';
@@ -164,6 +171,7 @@ function closeAllBuilderMenus() {
   closeSlideMenu();
   closeVariantMenu();
   closePresentationMenu();
+  closeEditMenu();
   closeSlideToolsMenu();
   closeTablePicker();
   closeAddContentMenu();
@@ -172,6 +180,13 @@ function closeAllBuilderMenus() {
   closeFormatMenu();
   closeTintMenu();
 }
+
+function refreshEditMenuState() {
+  if (editUndoBtn) editUndoBtn.classList.toggle('is-disabled', !canUndo());
+  if (editRedoBtn) editRedoBtn.classList.toggle('is-disabled', !canRedo());
+}
+
+onHistoryChange(refreshEditMenuState);
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -467,6 +482,35 @@ function setupButtonHandlers() {
       } else {
         closePresentationMenu();
       }
+    });
+  }
+
+  if (editMenuBtn) {
+    editMenuBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (editMenu?.hidden) {
+        closeAllBuilderMenus();
+        openEditMenu();
+      } else {
+        closeEditMenu();
+      }
+    });
+  }
+
+  if (editUndoBtn) {
+    editUndoBtn.addEventListener('click', () => {
+      if (editUndoBtn.classList.contains('is-disabled')) return;
+      undo();
+      closeEditMenu();
+    });
+  }
+
+  if (editRedoBtn) {
+    editRedoBtn.addEventListener('click', () => {
+      if (editRedoBtn.classList.contains('is-disabled')) return;
+      redo();
+      closeEditMenu();
     });
   }
 
@@ -895,6 +939,12 @@ function setupKeyboardShortcuts() {
         handleAddColumn();
         return;
       }
+      if (key === 'z') {
+        if (isEditableTarget(document.activeElement)) return; // native in-field undo wins
+        event.preventDefault();
+        if (event.shiftKey) redo(); else undo();
+        return;
+      }
       if (event.key.startsWith('Arrow')) {
         const { h, v } = state.selected;
         const column = state.stacks[h] || [];
@@ -1068,6 +1118,7 @@ function initBuilderEvents() {
   updatePresentationPropertiesState();
   updateEditExternalState();
   updateOpenFolderState();
+  refreshEditMenuState();
   loadContentCreators()
     .then(async () => {
       await loadBuilderExtensionsFromPlugins();

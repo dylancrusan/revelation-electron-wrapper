@@ -28,6 +28,10 @@ const topEditorEl = document.getElementById('top-editor');
 const notesEditorEl = document.getElementById('notes-editor');
 const previewFrame = document.getElementById('preview-frame');
 const saveBtn = document.getElementById('save-btn');
+const editMenuBtn = document.getElementById('edit-menu-btn');
+const editMenu = document.getElementById('edit-menu');
+const editUndoBtn = document.getElementById('edit-undo-btn');
+const editRedoBtn = document.getElementById('edit-redo-btn');
 const addContentBtn = document.getElementById('add-content-btn');
 const addContentMenu = document.getElementById('add-content-menu');
 const variantMenuBtn = document.getElementById('variant-menu-btn');
@@ -134,6 +138,10 @@ export {
   notesEditorEl,
   previewFrame,
   saveBtn,
+  editMenuBtn,
+  editMenu,
+  editUndoBtn,
+  editRedoBtn,
   addContentBtn,
   addContentMenu,
   variantMenuBtn,
