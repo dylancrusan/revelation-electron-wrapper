@@ -6,6 +6,14 @@ function escapeHTML(value) {
     .replace(/"/g, '&quot;');
 }
 
+// window.tr (revelation/js/translate.js) isn't guaranteed to be set up yet on
+// every reload path this preprocessor can run on (e.g. the canvas builder's
+// preview iframe) — every other plugin in this codebase guards the same way
+// instead of calling the global directly.
+function tr(key) {
+  return (typeof window !== 'undefined' && typeof window.tr === 'function') ? window.tr(key) : key;
+}
+
 function leadingSpaces(value) {
   const match = String(value || '').match(/^ */);
   return match ? match[0].length : 0;

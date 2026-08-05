@@ -1,5 +1,12 @@
 import { preprocessMarkdown } from './markdown-preprocessor.js';
 
+// window.tr (revelation/js/translate.js) isn't guaranteed to be set up yet
+// on every load path — every other plugin client in this codebase guards
+// the same way instead of calling the global directly.
+function tr(key) {
+  return typeof window.tr === 'function' ? window.tr(key) : key;
+}
+
 const SONGSELECT_TERMS_LINE = /^For use solely with the SongSelect(?:®)? Terms of Use\.?\s+All rights reserved\.\s+www\.ccli\.com\s*$/i;
 const SONGSELECT_LICENSE_LINE = /^CCLI License\s*#\s*([A-Za-z0-9-]+)\s*$/i;
 const SONGSELECT_CCLI_SONG_LINE = /^CCLI Song\s*#\s*([0-9]+)\s*$/i;
