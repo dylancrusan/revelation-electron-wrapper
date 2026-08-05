@@ -534,6 +534,17 @@ app.on('before-quit', () => {
     alwaysOpenStartupTimer = null;
   }
   presentationWindow.markAppQuitting?.();
+});
+
+// Teardown that only makes sense once the quit is actually going to happen —
+// before-quit fires the instant app.quit() is *attempted*, before any
+// window's own close handler gets a chance to cancel it (e.g. the
+// Presentation Builder's unsaved-changes prompt). Stopping the dev server
+// there killed it even when a pending window blocked the close and the app
+// never actually exited, leaving every open window's preview permanently
+// disconnected until a manual force-quit. will-quit only fires after every
+// window has successfully closed, so by then the quit can't be cancelled.
+app.on('will-quit', () => {
   mdnsManager.stop(AppContext);
   peerCommandClient.stop();
   apiServer.stop();
