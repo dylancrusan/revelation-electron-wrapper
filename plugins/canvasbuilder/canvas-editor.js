@@ -228,7 +228,10 @@ const BLOCK_STYLE_DEFAULTS = Object.freeze({
   // Freeform position (% of stage, anchored at the block's own center).
   // Empty until the block is dragged or moved via the Layout Zone grid;
   // resolveBlockPosition() falls back to the zone's preset ax/ay until then.
-  x: '', y: ''
+  x: '', y: '',
+  // Prevents drag/edit/delete in the canvas builder. Editor-only concept —
+  // never rendered on the real compiled slide, so no compiler changes needed.
+  locked: false
 });
 
 // Split on commas that separate key=value pairs, but not commas nested
@@ -262,6 +265,7 @@ function parseBlockStyleArgs(argsStr) {
     if (k === 'bold' || k === 'italic' || k === 'underline') out[k] = v === '1';
     else if (k === 'box-bg') out.boxBg = v;
     else if (k === 'box-border') out.boxBorder = v;
+    else if (k === 'locked') out.locked = v === '1';
     else if (k in out) out[k] = v;
   });
   return out;
@@ -281,6 +285,7 @@ function serializeBlockStyleArgs(style) {
   if (style.x !== '' && style.x != null && style.y !== '' && style.y != null) {
     s += ',x=' + style.x + ',y=' + style.y;
   }
+  if (style.locked) s += ',locked=1';
   return s;
 }
 
@@ -504,6 +509,100 @@ function setBlockPosition(id, px, py, zoneId) {
   renderCanvas();
 }
 
+// Typed X/Y from the Arrange tab's Position fields. Unlike a drag (which
+// snaps to zones/center guides), a hand-typed position is always exact and
+// no longer any particular preset, so — like setBlockPosition — it clears
+// zone. Both axes commit as one mutation/undo-step.
+function setBlockPositionFields(id, x, y) {
+  const slide = getCurrentSlide();
+  if (!slide) return;
+  const blocks = parseBodyBlocks(slide.body);
+  const block = findBlock(blocks, id);
+  block.style = Object.assign({}, block.style, {
+    x: String(x),
+    y: String(y),
+    zone: ''
+  });
+  block.explicit = true;
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Set block position', () => ({ body: newBody }));
+  renderCanvas();
+  sendCanvasCommand('moveBlock', { id, x: Number(x), y: Number(y) });
+}
+
+// Effective on-stage position for a block, for display in the Arrange tab's
+// Position fields — unlike getBlockStyle().x/y (raw, possibly empty), this
+// resolves the zone-preset fallback too, so a legacy zone-only block (never
+// dragged) still shows a sensible X/Y instead of blank fields.
+function getResolvedBlockPosition() {
+  const slide = getCurrentSlide();
+  const blocks = parseBodyBlocks(slide ? slide.body : '');
+  const block = findBlock(blocks, selectedBlockId);
+  return resolveBlockPosition(block, slide ? slide.top : '');
+}
+
+function getStyleForBlockId(id) {
+  const slide = getCurrentSlide();
+  const blocks = parseBodyBlocks(slide ? slide.body : '');
+  return findBlock(blocks, id).style;
+}
+
+// Front/Back/Forward/Backward. .revelation-block divs are all position:absolute
+// with no explicit z-index, so later-in-DOM wins stacking ties — reordering
+// the in-memory blocks array (which serializeBodyBlocks writes out in order)
+// is the entire mechanism; no z-index style property is needed.
+function reorderBlocks(mutate) {
+  const slide = getCurrentSlide();
+  if (!slide) return;
+  const blocks = parseBodyBlocks(slide.body);
+  if (!mutate(blocks)) return;
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Reorder blocks', () => ({ body: newBody }));
+  renderCanvas();
+  // The live-preview iframe only reflects the last-saved file's DOM order
+  // and never reorders its own nodes on its own — tell it to restack now so
+  // Front/Back is visible immediately, not just after the next Save.
+  sendCanvasCommand('reorderBlocks', { ids: blocks.map(b => b.id) });
+}
+
+function bringToFront(id) {
+  reorderBlocks(blocks => {
+    const idx = blocks.findIndex(b => b.id === id);
+    if (idx < 0 || idx === blocks.length - 1) return false;
+    const [block] = blocks.splice(idx, 1);
+    blocks.push(block);
+    return true;
+  });
+}
+
+function sendToBack(id) {
+  reorderBlocks(blocks => {
+    const idx = blocks.findIndex(b => b.id === id);
+    if (idx <= 0) return false;
+    const [block] = blocks.splice(idx, 1);
+    blocks.unshift(block);
+    return true;
+  });
+}
+
+function bringForward(id) {
+  reorderBlocks(blocks => {
+    const idx = blocks.findIndex(b => b.id === id);
+    if (idx < 0 || idx === blocks.length - 1) return false;
+    [blocks[idx], blocks[idx + 1]] = [blocks[idx + 1], blocks[idx]];
+    return true;
+  });
+}
+
+function sendBackward(id) {
+  reorderBlocks(blocks => {
+    const idx = blocks.findIndex(b => b.id === id);
+    if (idx <= 0) return false;
+    [blocks[idx], blocks[idx - 1]] = [blocks[idx - 1], blocks[idx]];
+    return true;
+  });
+}
+
 function removeBg() {
   const slide = getCurrentSlide();
   if (!slide) return;
@@ -553,7 +652,8 @@ function addTextBlock() {
 function canDeleteSelectedBlock() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
-  return blocks.length > 1;
+  if (blocks.length <= 1) return false;
+  return !findBlock(blocks, selectedBlockId).style.locked;
 }
 
 function deleteSelectedBlock() {
@@ -561,6 +661,7 @@ function deleteSelectedBlock() {
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
   if (blocks.length <= 1) return;
+  if (findBlock(blocks, selectedBlockId).style.locked) return;
   const remaining = blocks.filter(b => b.id !== selectedBlockId);
   const newBody = serializeBodyBlocks(remaining);
   selectedBlockId = remaining[0].id;
@@ -859,7 +960,7 @@ function renderCanvas() {
     renderBlocksLayer(blocks, slide.top);
 
     const deleteBlockBtn = canvasEl.querySelector('.canvas-delete-block-btn');
-    if (deleteBlockBtn) deleteBlockBtn.hidden = blocks.length <= 1;
+    if (deleteBlockBtn) deleteBlockBtn.hidden = !canDeleteSelectedBlock();
   }
 
   navigateCanvas();
@@ -885,6 +986,7 @@ function renderBlocksLayer(blocks, slideTop) {
       el.style.transform = 'translate(-50%, -50%)';
     }
     if (block.id === selectedBlockId) el.classList.add('is-selected');
+    if (block.style.locked) el.classList.add('is-locked');
     el.dataset.blockId = String(block.id);
 
     const inner = document.createElement('div');
@@ -1010,6 +1112,7 @@ function wireBlockEvents(blockEl, blockId) {
     e.preventDefault();
     e.stopPropagation();
     selectBlock(blockId);
+    if (getStyleForBlockId(blockId).locked) return;
     enterEditMode(blockId);
   });
 
@@ -1017,6 +1120,7 @@ function wireBlockEvents(blockEl, blockId) {
     if (e.button !== 0) return;
     if (textarea && !textarea.hidden) return;
 
+    const locked = getStyleForBlockId(blockId).locked;
     const stageRect = stage.getBoundingClientRect();
     const blockRect = blockEl.getBoundingClientRect();
     offsetX = e.clientX - blockRect.left;
@@ -1031,7 +1135,7 @@ function wireBlockEvents(blockEl, blockId) {
       const dx = e.clientX - startMouseX;
       const dy = e.clientY - startMouseY;
 
-      if (!dragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+      if (!dragging && !locked && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
         dragging = true;
         blockEl.classList.add('is-dragging');
         LAYOUT_ZONES.forEach(z => blockEl.classList.remove('canvas-zone-' + z.id));
@@ -1307,5 +1411,7 @@ function isCanvasActive() { return canvasActive; }
 export {
   initCanvasEditor, activateCanvas, deactivateCanvas, isCanvasActive, renderCanvas,
   getBlockStyle, getBodyInfo, setBlockStyleProp, applyLayout, removeBg,
-  getSelectedBlockId, addTextBlock, deleteSelectedBlock, canDeleteSelectedBlock
+  getSelectedBlockId, addTextBlock, deleteSelectedBlock, canDeleteSelectedBlock,
+  setBlockPositionFields, getResolvedBlockPosition,
+  bringToFront, sendToBack, bringForward, sendBackward
 };

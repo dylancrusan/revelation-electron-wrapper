@@ -129,6 +129,10 @@
   outline-offset: 3px;
   border-radius: 4px;
 }
+.canvas-text-block.is-locked { cursor: default; }
+.canvas-text-block.is-locked.is-selected {
+  outline-color: rgba(148,163,184,0.85);
+}
 
 /* Layout zone positions — each sizes to its own content (matching the real
    renderer's .revelation-block rules in revelation/css/source/custom/

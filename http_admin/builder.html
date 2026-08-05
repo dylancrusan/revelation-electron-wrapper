@@ -222,100 +222,189 @@
     <div class="col-resize-handle" id="right-insp-resize-handle" title="Drag to resize"></div>
     <section class="builder-inspector" id="builder-inspector">
 
-      <div class="insp-section">
-        <div class="insp-label">Background</div>
-        <div class="insp-btn-row">
-          <button class="insp-btn" id="insp-bg-btn">Image / Video</button>
-          <button class="insp-btn" id="insp-tint-btn">Gradient</button>
-        </div>
-        <button class="insp-btn insp-remove-btn" id="insp-remove-bg-btn" hidden>✕ Remove</button>
+      <div class="insp-tabs" id="insp-tabs">
+        <button class="insp-tab-btn is-active" data-tab="style" type="button">Style</button>
+        <button class="insp-tab-btn" data-tab="text" type="button">Text</button>
+        <button class="insp-tab-btn" data-tab="arrange" type="button">Arrange</button>
       </div>
-      <div class="insp-section">
-        <div class="insp-label">Layout Zone</div>
-        <div class="insp-zone-grid" id="insp-zone-grid">
-          <button class="insp-zone-btn" data-zone="topleft" title="Top Left">↖</button>
-          <button class="insp-zone-btn" data-zone="upperthird" title="Upper Third">↑</button>
-          <button class="insp-zone-btn" data-zone="topright" title="Top Right">↗</button>
-          <button class="insp-zone-btn" data-zone="shiftleft" title="Left">←</button>
-          <button class="insp-zone-btn" data-zone="center" title="Center">⊙</button>
-          <button class="insp-zone-btn" data-zone="shiftright" title="Right">→</button>
-          <button class="insp-zone-btn" data-zone="bottomleft" title="Bottom Left">↙</button>
-          <button class="insp-zone-btn" data-zone="lowerthird" title="Lower Third">↓</button>
-          <button class="insp-zone-btn" data-zone="bottomright" title="Bottom Right">↘</button>
+
+      <div class="insp-tab-panel is-active" data-tab-panel="style">
+        <div class="insp-section">
+          <div class="insp-label">Background</div>
+          <div class="insp-btn-row">
+            <button class="insp-btn" id="insp-bg-btn">Image / Video</button>
+            <button class="insp-btn" id="insp-tint-btn">Gradient</button>
+          </div>
+          <button class="insp-btn insp-remove-btn" id="insp-remove-bg-btn" hidden>✕ Remove</button>
+        </div>
+        <div class="insp-section">
+          <div class="insp-label">Box Fill</div>
+          <div id="insp-boxbg-menu" class="xcp-dropdown xcp-inline"></div>
+          <div class="insp-label">Box Border</div>
+          <div id="insp-boxborder-menu" class="xcp-dropdown xcp-inline"></div>
         </div>
       </div>
-      <div class="insp-section">
-        <div class="insp-label">Text</div>
-        <select id="insp-block-type-select" class="insp-select insp-block-type-select">
-          <option value="h1">Heading 1</option>
-          <option value="h2">Heading 2</option>
-          <option value="h3">Heading 3</option>
-          <option value="h4">Heading 4</option>
-          <option value="h5">Heading 5</option>
-          <option value="h6">Heading 6</option>
-          <option value="p">Body</option>
-          <option value="ul">Bullet List</option>
-          <option value="ol">Numbered List</option>
-          <option value="quote">Quote</option>
-          <option value="ref">Reference</option>
-        </select>
-        <select id="insp-text-bg-select" class="insp-select insp-text-bg-select">
-          <option value="">No Text Background</option>
-          <option value="darkbg">Dark Text Background</option>
-          <option value="lightbg">Light Text Background</option>
-        </select>
-        <select id="insp-font-select" class="insp-select insp-font-select">
-          <option value="">Default Font</option>
-        </select>
-        <div class="insp-row">
-          <select id="insp-size-select" class="insp-select insp-size-select">
-            <option value="">Size</option>
-            <option value="5px">5</option>
-            <option value="6px">6</option>
-            <option value="7px">7</option>
-            <option value="8px">8</option>
-            <option value="9px">9</option>
-            <option value="10px">10</option>
-            <option value="11px">11</option>
-            <option value="12px">12</option>
-            <option value="13px">13</option>
-            <option value="14px">14</option>
-            <option value="16px">16</option>
-            <option value="18px">18</option>
-            <option value="20px">20</option>
-            <option value="22px">22</option>
-            <option value="24px">24</option>
-            <option value="28px">28</option>
-            <option value="32px">32</option>
-            <option value="36px">36</option>
-            <option value="40px">40</option>
-            <option value="48px">48</option>
-            <option value="56px">56</option>
-            <option value="64px">64</option>
-            <option value="72px">72</option>
+
+      <div class="insp-tab-panel" data-tab-panel="text">
+        <div class="insp-section">
+          <div class="insp-label">Text</div>
+          <select id="insp-block-type-select" class="insp-select insp-block-type-select">
+            <option value="h1">Heading 1</option>
+            <option value="h2">Heading 2</option>
+            <option value="h3">Heading 3</option>
+            <option value="h4">Heading 4</option>
+            <option value="h5">Heading 5</option>
+            <option value="h6">Heading 6</option>
+            <option value="p">Body</option>
+            <option value="ul">Bullet List</option>
+            <option value="ol">Numbered List</option>
+            <option value="quote">Quote</option>
+            <option value="ref">Reference</option>
           </select>
+          <select id="insp-text-bg-select" class="insp-select insp-text-bg-select">
+            <option value="">No Text Background</option>
+            <option value="darkbg">Dark Text Background</option>
+            <option value="lightbg">Light Text Background</option>
+          </select>
+          <select id="insp-font-select" class="insp-select insp-font-select">
+            <option value="">Default Font</option>
+          </select>
+          <div class="insp-row">
+            <select id="insp-size-select" class="insp-select insp-size-select">
+              <option value="">Size</option>
+              <option value="5px">5</option>
+              <option value="6px">6</option>
+              <option value="7px">7</option>
+              <option value="8px">8</option>
+              <option value="9px">9</option>
+              <option value="10px">10</option>
+              <option value="11px">11</option>
+              <option value="12px">12</option>
+              <option value="13px">13</option>
+              <option value="14px">14</option>
+              <option value="16px">16</option>
+              <option value="18px">18</option>
+              <option value="20px">20</option>
+              <option value="22px">22</option>
+              <option value="24px">24</option>
+              <option value="28px">28</option>
+              <option value="32px">32</option>
+              <option value="36px">36</option>
+              <option value="40px">40</option>
+              <option value="48px">48</option>
+              <option value="56px">56</option>
+              <option value="64px">64</option>
+              <option value="72px">72</option>
+            </select>
+          </div>
+          <div class="insp-row">
+            <button class="insp-fmt-btn" id="insp-bold-btn" title="Bold"><b>B</b></button>
+            <button class="insp-fmt-btn" id="insp-italic-btn" title="Italic"><i>I</i></button>
+            <button class="insp-fmt-btn" id="insp-underline-btn" title="Underline"><u>U</u></button>
+            <div class="insp-sep"></div>
+            <button class="insp-fmt-btn" id="insp-number-btn" title="Numbered List">1.</button>
+            <button class="insp-fmt-btn" id="insp-bullet-btn" title="Bullet List">•</button>
+            <div class="insp-sep"></div>
+            <button class="insp-align-btn" id="insp-align-left" data-align="left" title="Align Left"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+            <button class="insp-align-btn" id="insp-align-center" data-align="center" title="Align Center"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="2.5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+            <button class="insp-align-btn" id="insp-align-right" data-align="right" title="Align Right"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+            <button class="insp-align-btn" id="insp-align-justify" data-align="justify" title="Justify"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="13" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+          </div>
+          <div id="insp-color-menu" class="xcp-dropdown xcp-inline"></div>
         </div>
-        <div class="insp-row">
-          <button class="insp-fmt-btn" id="insp-bold-btn" title="Bold"><b>B</b></button>
-          <button class="insp-fmt-btn" id="insp-italic-btn" title="Italic"><i>I</i></button>
-          <button class="insp-fmt-btn" id="insp-underline-btn" title="Underline"><u>U</u></button>
-          <div class="insp-sep"></div>
-          <button class="insp-fmt-btn" id="insp-number-btn" title="Numbered List">1.</button>
-          <button class="insp-fmt-btn" id="insp-bullet-btn" title="Bullet List">•</button>
-          <div class="insp-sep"></div>
-          <button class="insp-align-btn" id="insp-align-left" data-align="left" title="Align Left"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
-          <button class="insp-align-btn" id="insp-align-center" data-align="center" title="Align Center"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="2.5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
-          <button class="insp-align-btn" id="insp-align-right" data-align="right" title="Align Right"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="5" y="4.5" width="8" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
-          <button class="insp-align-btn" id="insp-align-justify" data-align="justify" title="Justify"><svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4.5" width="13" height="2" rx="1"/><rect x="0" y="9" width="13" height="2" rx="1"/></svg></button>
+      </div>
+
+      <div class="insp-tab-panel" data-tab-panel="arrange">
+        <div class="insp-section">
+          <div class="insp-label">Order</div>
+          <div class="insp-btn-row">
+            <button class="insp-btn" id="insp-order-back-btn" type="button" title="Send to Back">⬇ Back</button>
+            <button class="insp-btn" id="insp-order-front-btn" type="button" title="Bring to Front">⬆ Front</button>
+          </div>
+          <div class="insp-btn-row">
+            <button class="insp-btn" id="insp-order-backward-btn" type="button" title="Send Backward">▽ Backward</button>
+            <button class="insp-btn" id="insp-order-forward-btn" type="button" title="Bring Forward">△ Forward</button>
+          </div>
         </div>
-        <div id="insp-color-menu" class="xcp-dropdown xcp-inline"></div>
+        <div class="insp-section">
+          <div class="insp-row">
+            <div class="insp-dropdown" id="insp-align-dropdown">
+              <button class="insp-btn insp-dropdown-trigger" id="insp-align-dropdown-btn" type="button">Align ▾</button>
+              <div class="insp-dropdown-menu" id="insp-align-menu" hidden>
+                <div class="insp-zone-grid" id="insp-zone-grid">
+                  <button class="insp-zone-btn" data-zone="topleft" title="Top Left">↖</button>
+                  <button class="insp-zone-btn" data-zone="upperthird" title="Upper Third">↑</button>
+                  <button class="insp-zone-btn" data-zone="topright" title="Top Right">↗</button>
+                  <button class="insp-zone-btn" data-zone="shiftleft" title="Left">←</button>
+                  <button class="insp-zone-btn" data-zone="center" title="Center">⊙</button>
+                  <button class="insp-zone-btn" data-zone="shiftright" title="Right">→</button>
+                  <button class="insp-zone-btn" data-zone="bottomleft" title="Bottom Left">↙</button>
+                  <button class="insp-zone-btn" data-zone="lowerthird" title="Lower Third">↓</button>
+                  <button class="insp-zone-btn" data-zone="bottomright" title="Bottom Right">↘</button>
+                </div>
+              </div>
+            </div>
+            <div class="insp-dropdown" id="insp-distribute-dropdown">
+              <button class="insp-btn insp-dropdown-trigger" id="insp-distribute-dropdown-btn" type="button" disabled title="Select 3+ objects">Distribute ▾</button>
+              <div class="insp-dropdown-menu insp-dropdown-menu--right" id="insp-distribute-menu" hidden>
+                <button class="insp-btn" id="insp-distribute-h-btn" type="button" disabled>Distribute Horizontally</button>
+                <button class="insp-btn" id="insp-distribute-v-btn" type="button" disabled>Distribute Vertically</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="insp-section">
+          <div class="insp-label">Size</div>
+          <div class="insp-dim-row">
+            <label class="insp-dim-field">
+              <input type="number" id="insp-size-width" class="insp-number-input" disabled>
+              <span>Width</span>
+            </label>
+            <label class="insp-dim-field">
+              <input type="number" id="insp-size-height" class="insp-number-input" disabled>
+              <span>Height</span>
+            </label>
+          </div>
+          <label class="insp-checkbox-row">
+            <input type="checkbox" id="insp-size-constrain" disabled>
+            Constrain proportions
+          </label>
+        </div>
+        <div class="insp-section">
+          <div class="insp-label">Position</div>
+          <div class="insp-dim-row">
+            <label class="insp-dim-field">
+              <input type="number" id="insp-pos-x" class="insp-number-input">
+              <span>X</span>
+            </label>
+            <label class="insp-dim-field">
+              <input type="number" id="insp-pos-y" class="insp-number-input">
+              <span>Y</span>
+            </label>
+          </div>
+        </div>
+        <div class="insp-section">
+          <div class="insp-label">Rotate</div>
+          <div class="insp-row">
+            <input type="number" id="insp-rotate-angle" class="insp-number-input insp-rotate-angle" disabled>
+            <span class="insp-unit">°</span>
+            <div class="insp-sep"></div>
+            <button class="insp-fmt-btn" id="insp-flip-h-btn" type="button" disabled title="Flip Horizontal">⇋</button>
+            <button class="insp-fmt-btn" id="insp-flip-v-btn" type="button" disabled title="Flip Vertical">⇵</button>
+          </div>
+        </div>
+        <div class="insp-section">
+          <div class="insp-btn-row">
+            <button class="insp-btn" id="insp-lock-btn" type="button">Lock</button>
+            <button class="insp-btn" id="insp-unlock-btn" type="button" disabled>Unlock</button>
+          </div>
+          <div class="insp-btn-row">
+            <button class="insp-btn" id="insp-group-btn" type="button" disabled>Group</button>
+            <button class="insp-btn" id="insp-ungroup-btn" type="button" disabled>Ungroup</button>
+          </div>
+        </div>
       </div>
-      <div class="insp-section">
-        <div class="insp-label">Box Fill</div>
-        <div id="insp-boxbg-menu" class="xcp-dropdown xcp-inline"></div>
-        <div class="insp-label">Box Border</div>
-        <div id="insp-boxborder-menu" class="xcp-dropdown xcp-inline"></div>
-      </div>
+
       <div class="insp-footer">
         <button id="show-code-btn" class="show-code-btn">Show Code ▾</button>
       </div>

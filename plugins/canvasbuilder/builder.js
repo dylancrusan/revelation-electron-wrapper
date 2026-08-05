@@ -11,7 +11,14 @@ import {
   removeBg,
   getBlockStyle,
   setBlockStyleProp,
-  getBodyInfo
+  getBodyInfo,
+  getSelectedBlockId,
+  setBlockPositionFields,
+  getResolvedBlockPosition,
+  bringToFront,
+  sendToBack,
+  bringForward,
+  sendBackward
 } from './canvas-editor.js';
 import { renderNotes } from './notes-preview.js';
 
@@ -104,13 +111,79 @@ export function getBuilderExtensions(ctx = {}) {
     // Remove-bg button visibility
     const removeBgBtn = document.getElementById('insp-remove-bg-btn');
     if (removeBgBtn) removeBgBtn.hidden = !info.hasBg;
+
+    // Arrange tab — lock state gates Order/Position (Size/Rotate/Group stay
+    // disabled regardless until their own phases wire them up)
+    const locked = !!style.locked;
+    const lockBtn   = document.getElementById('insp-lock-btn');
+    const unlockBtn = document.getElementById('insp-unlock-btn');
+    if (lockBtn)   lockBtn.disabled   = locked;
+    if (unlockBtn) unlockBtn.disabled = !locked;
+    ['insp-order-front-btn', 'insp-order-back-btn', 'insp-order-forward-btn', 'insp-order-backward-btn']
+      .forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = locked;
+      });
+
+    // Position — shown as percent of stage width/height (the block's own
+    // underlying storage unit; see getResolvedBlockPosition in canvas-editor.js)
+    const posX = document.getElementById('insp-pos-x');
+    const posY = document.getElementById('insp-pos-y');
+    const pos = getResolvedBlockPosition();
+    if (posX && document.activeElement !== posX) { posX.value = Math.round(pos.x * 10) / 10; posX.disabled = locked; }
+    if (posY && document.activeElement !== posY) { posY.value = Math.round(pos.y * 10) / 10; posY.disabled = locked; }
   }
 
-  // Zone grid
+  // Tabs
+  document.querySelectorAll('#insp-tabs .insp-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#insp-tabs .insp-tab-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+      document.querySelectorAll('.insp-tab-panel').forEach(panel => {
+        panel.classList.toggle('is-active', panel.dataset.tabPanel === btn.dataset.tab);
+      });
+    });
+  });
+
+  // Align / Distribute dropdowns
+  const closeAlignMenu = _wireDropdown(document.getElementById('insp-align-dropdown-btn'), document.getElementById('insp-align-menu'));
+  _wireDropdown(document.getElementById('insp-distribute-dropdown-btn'), document.getElementById('insp-distribute-menu'));
+
+  // Order — Front / Back / Forward / Backward
+  const orderFrontBtn    = document.getElementById('insp-order-front-btn');
+  const orderBackBtn     = document.getElementById('insp-order-back-btn');
+  const orderForwardBtn  = document.getElementById('insp-order-forward-btn');
+  const orderBackwardBtn = document.getElementById('insp-order-backward-btn');
+  if (orderFrontBtn)    orderFrontBtn.addEventListener('click', () => bringToFront(getSelectedBlockId()));
+  if (orderBackBtn)     orderBackBtn.addEventListener('click', () => sendToBack(getSelectedBlockId()));
+  if (orderForwardBtn)  orderForwardBtn.addEventListener('click', () => bringForward(getSelectedBlockId()));
+  if (orderBackwardBtn) orderBackwardBtn.addEventListener('click', () => sendBackward(getSelectedBlockId()));
+
+  // Position X/Y — commit on blur/Enter (change event), not on every keystroke
+  const posXInput = document.getElementById('insp-pos-x');
+  const posYInput = document.getElementById('insp-pos-y');
+  function commitPositionFields() {
+    if (!posXInput || !posYInput) return;
+    const x = parseFloat(posXInput.value);
+    const y = parseFloat(posYInput.value);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    setBlockPositionFields(getSelectedBlockId(), x, y);
+    syncInspector();
+  }
+  if (posXInput) posXInput.addEventListener('change', commitPositionFields);
+  if (posYInput) posYInput.addEventListener('change', commitPositionFields);
+
+  // Lock / Unlock
+  const lockBtn   = document.getElementById('insp-lock-btn');
+  const unlockBtn = document.getElementById('insp-unlock-btn');
+  if (lockBtn)   lockBtn.addEventListener('click',   () => { setBlockStyleProp('locked', true);  syncInspector(); });
+  if (unlockBtn) unlockBtn.addEventListener('click', () => { setBlockStyleProp('locked', false); syncInspector(); });
+
+  // Zone grid (housed inside the Arrange tab's Align dropdown)
   document.querySelectorAll('#insp-zone-grid .insp-zone-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       applyLayout(btn.dataset.zone);
       syncInspector();
+      closeAlignMenu();
     });
   });
 
@@ -634,6 +707,42 @@ function setupInspectorResize() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
+}
+
+// Generic trigger/menu dropdown: toggles the menu's `hidden` attribute and
+// closes on an outside click or Escape — mirrors the open/close pattern
+// already used throughout http_admin/builder/menus.js for the toolbar's own
+// dropdowns (e.g. openSlideToolsMenu/closeSlideToolsMenu), just generalized
+// to take any trigger+menu pair instead of one hardcoded per menu.
+function _wireDropdown(triggerBtn, menuEl) {
+  if (!triggerBtn || !menuEl) return () => {};
+
+  function close() {
+    menuEl.hidden = true;
+    triggerBtn.classList.remove('is-active');
+    document.removeEventListener('mousedown', onOutsideClick);
+    document.removeEventListener('keydown', onKeydown);
+  }
+
+  function onOutsideClick(e) {
+    if (menuEl.contains(e.target) || triggerBtn.contains(e.target)) return;
+    close();
+  }
+
+  function onKeydown(e) {
+    if (e.key === 'Escape') close();
+  }
+
+  triggerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!menuEl.hidden) { close(); return; }
+    menuEl.hidden = false;
+    triggerBtn.classList.add('is-active');
+    document.addEventListener('mousedown', onOutsideClick);
+    document.addEventListener('keydown', onKeydown);
+  });
+
+  return close;
 }
 
 function _hexToRgba(hex, alpha) {
