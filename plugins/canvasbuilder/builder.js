@@ -46,7 +46,7 @@ export function getBuilderExtensions(ctx = {}) {
   const canvasPanel = document.getElementById('canvas-editor-panel');
   if (!canvasPanel) return [];
 
-  initCanvasEditor(canvasPanel, { host, slug, dir, mdFile });
+  initCanvasEditor(canvasPanel, { host, slug, dir, mdFile, onSelectionChange: () => syncInspector() });
 
   // Render immediately and on every host event
   renderCanvas();

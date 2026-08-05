@@ -54,6 +54,8 @@
 .canvas-act-btn:hover { background: rgba(60,70,100,0.9); }
 .canvas-act-remove { color: #f87171; }
 .canvas-act-remove:hover { background: rgba(120,30,30,0.85); color: #fca5a5; }
+.canvas-act-danger { color: #f87171; }
+.canvas-act-danger:hover { background: rgba(120,30,30,0.85); color: #fca5a5; }
 .canvas-edit-btn { margin-right: auto; }
 .canvas-edit-btn.is-saving { background: rgba(30,80,40,0.85); color: #86efac; border-color: rgba(134,239,172,0.3); }
 .canvas-edit-btn.is-saving:hover { background: rgba(22,101,52,0.9); }
@@ -102,6 +104,13 @@
   display: block;
 }
 
+/* ── Text blocks layer (holds one or more independently positioned blocks) ── */
+
+.canvas-blocks-layer {
+  position: absolute;
+  inset: 0;
+}
+
 /* ── Text block (draggable overlay) ──────────────────────────────────────── */
 
 .canvas-text-block {
@@ -114,17 +123,38 @@
   gap: 4px;
 }
 .canvas-text-block.is-dragging { opacity: 0.4; cursor: grabbing; }
+.canvas-text-block.is-selected {
+  outline: 2px solid rgba(78,106,255,0.85);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 
-/* Layout zone positions */
-.canvas-zone-center     { top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; text-align: center; align-items: center; }
-.canvas-zone-upperthird { top: 6%; left: 10%; right: 10%; width: 80%; text-align: center; align-items: center; }
-.canvas-zone-lowerthird { bottom: 6%; left: 10%; right: 10%; width: 80%; text-align: center; align-items: center; }
-.canvas-zone-shiftright { top: 50%; right: 4%; width: 48%; transform: translateY(-50%); }
-.canvas-zone-shiftleft  { top: 50%; left: 4%; width: 48%; transform: translateY(-50%); }
-.canvas-zone-topleft    { top: 6%; left: 4%; width: 48%; }
-.canvas-zone-topright   { top: 6%; right: 4%; width: 48%; text-align: right; align-items: flex-end; }
-.canvas-zone-bottomleft  { bottom: 6%; left: 4%; width: 48%; }
-.canvas-zone-bottomright { bottom: 6%; right: 4%; width: 48%; text-align: right; align-items: flex-end; }
+/* Layout zone positions — each sizes to its own content (matching the real
+   renderer's .revelation-block rules in revelation/css/source/custom/
+   layouts.scss) rather than always claiming a fixed 80%/48% span. */
+.canvas-text-block { width: max-content; }
+/* max-width is in `em` (relative to .canvas-stage's own base font-size,
+   set dynamically by updateCanvasScale), not `%` of the stage. A percentage
+   here would be relative to the stage's actual on-screen pixel width, which
+   has no fixed relationship to the real renderer's own max-width (computed
+   against its fixed 960px design canvas, independent of how large the
+   builder panel happens to be) — text that fits on one line in the real
+   render could wrap to two locally purely because the panel is narrow, with
+   no wrapping mismatch in the underlying font size at all. Expressing this
+   relative to the base font-size instead keeps the max-width/font-size
+   ratio — and so the wrapping decision — consistent with the real theme's
+   own (960px design, 90%/80%/48% max-widths, ~42px base font-size) at any
+   panel size. Values: 90%/80%/48% of 960px, divided by that ~42px base.
+   Recalibrate these if the real theme's own numbers change. */
+.canvas-zone-center     { top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 20.57em; text-align: center; align-items: center; }
+.canvas-zone-upperthird { top: 6%; left: 50%; transform: translateX(-50%); max-width: 18.29em; text-align: center; align-items: center; }
+.canvas-zone-lowerthird { bottom: 6%; left: 50%; transform: translateX(-50%); max-width: 18.29em; text-align: center; align-items: center; }
+.canvas-zone-shiftright { top: 50%; right: 4%; max-width: 10.97em; transform: translateY(-50%); }
+.canvas-zone-shiftleft  { top: 50%; left: 4%; max-width: 10.97em; transform: translateY(-50%); }
+.canvas-zone-topleft    { top: 6%; left: 4%; max-width: 10.97em; }
+.canvas-zone-topright   { top: 6%; right: 4%; max-width: 10.97em; text-align: right; align-items: flex-end; }
+.canvas-zone-bottomleft  { bottom: 6%; left: 4%; max-width: 10.97em; }
+.canvas-zone-bottomright { bottom: 6%; right: 4%; max-width: 10.97em; text-align: right; align-items: flex-end; }
 
 /* Text inner — transparent so the iframe preview shows through cleanly */
 .canvas-text-inner {
@@ -163,14 +193,34 @@
 
 /* ── Inline text editor ──────────────────────────────────────────────────── */
 
-.canvas-text-editor {
+/* Scoped under .canvas-stage (rather than bare .canvas-text-editor) so these
+   rules outrank .slide-wysiwyg-editor's rules below — the editor element
+   carries both classes ("canvas-text-editor slide-wysiwyg-editor"), and at
+   equal specificity the later-in-file .slide-wysiwyg-editor rules would
+   otherwise win, which is exactly what silently overrode the transparent
+   background/sizing here before (a real live bug, caught by inspecting an
+   actual edit-mode screenshot rather than assuming the CSS took effect). */
+.canvas-stage .canvas-text-editor {
   position: absolute;
-  background: rgba(0,0,0,0.58);
+  /* Transparent so the live slide background (rendered in the iframe behind
+     it) shows through while editing, Keynote-style, instead of the edit box
+     covering it with a flat fill. The border marks the editable region; the
+     text-shadow keeps text legible over busy photo backgrounds, matching how
+     the live-rendered slide text itself is styled. */
+  background: transparent;
   color: #fff;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.85);
   font-family: "Source Sans Pro", Helvetica, Arial, sans-serif;
-  font-size: 14px;
+  /* Explicitly inherit the .canvas-stage's own scaled font-size (set by
+     updateCanvasScale) the same way .canvas-text-inner does, so the editor's
+     em-based h1-h6/p sizing below actually matches how large the text really
+     renders in the live slide. Must be an explicit "inherit" rather than
+     just omitting the property — .slide-wysiwyg-editor's own font-size:14px
+     is otherwise the only declaration left for this property and wins by
+     default, regardless of this rule's higher selector specificity. */
+  font-size: inherit;
   line-height: 1.5;
-  border: 2px solid rgba(78,106,255,0.75);
+  border: 2px dashed rgba(78,106,255,0.75);
   border-radius: 6px;
   padding: 8px 12px;
   z-index: 10;
@@ -181,31 +231,38 @@
   word-break: break-word;
   min-height: 2em;
   width: 100%;
+  /* Reset the box-model properties .slide-wysiwyg-editor sets for its own
+     (unrelated, always-boxed) context — otherwise they'd leak through here
+     since this rule doesn't declare them at all, regardless of specificity. */
+  aspect-ratio: auto;
+  max-height: none;
+  flex: none;
+  box-shadow: none;
 }
-.canvas-text-editor[hidden] { display: none; }
-.canvas-text-editor:empty::before {
+.canvas-stage .canvas-text-editor[hidden] { display: none; }
+.canvas-stage .canvas-text-editor:empty::before {
   content: attr(placeholder);
   color: rgba(255,255,255,0.35);
   font-style: italic;
   pointer-events: none;
 }
-.canvas-text-editor h1,
-.canvas-text-editor h2,
-.canvas-text-editor h3,
-.canvas-text-editor h4,
-.canvas-text-editor h5,
-.canvas-text-editor h6 { margin: 4px 0; font-weight: 700; line-height: 1.3; color: #fff; }
-.canvas-text-editor h1 { font-size: 2.2em; }
-.canvas-text-editor h2 { font-size: 1.5em; }
-.canvas-text-editor h3 { font-size: 1.1em; }
-.canvas-text-editor h4 { font-size: 1em; }
-.canvas-text-editor h5 { font-size: 0.9em; }
-.canvas-text-editor h6 { font-size: 0.8em; }
-.canvas-text-editor p  { margin: 2px 0; font-size: 0.85em; }
-.canvas-text-editor ul,
-.canvas-text-editor ol { margin: 4px 0; padding-left: 22px; font-size: 0.85em; }
-.canvas-text-editor li { margin: 2px 0; }
-.canvas-text-editor blockquote {
+.canvas-stage .canvas-text-editor h1,
+.canvas-stage .canvas-text-editor h2,
+.canvas-stage .canvas-text-editor h3,
+.canvas-stage .canvas-text-editor h4,
+.canvas-stage .canvas-text-editor h5,
+.canvas-stage .canvas-text-editor h6 { margin: 4px 0; font-weight: 700; line-height: 1.3; color: #fff; font-family: inherit; }
+.canvas-stage .canvas-text-editor h1 { font-size: 2.2em; }
+.canvas-stage .canvas-text-editor h2 { font-size: 1.5em; }
+.canvas-stage .canvas-text-editor h3 { font-size: 1.1em; }
+.canvas-stage .canvas-text-editor h4 { font-size: 1em; }
+.canvas-stage .canvas-text-editor h5 { font-size: 0.9em; }
+.canvas-stage .canvas-text-editor h6 { font-size: 0.8em; }
+.canvas-stage .canvas-text-editor p  { margin: 2px 0; font-size: 0.85em; }
+.canvas-stage .canvas-text-editor ul,
+.canvas-stage .canvas-text-editor ol { margin: 4px 0; padding-left: 22px; font-size: 0.85em; }
+.canvas-stage .canvas-text-editor li { margin: 2px 0; }
+.canvas-stage .canvas-text-editor blockquote {
   margin: 4px 0;
   padding: 2px 0 2px 10px;
   border-left: 3px solid rgba(255,255,255,0.4);
@@ -213,7 +270,7 @@
   font-size: 0.85em;
   opacity: 0.9;
 }
-.canvas-text-editor .slide-wysiwyg-verse-ref {
+.canvas-stage .canvas-text-editor .slide-wysiwyg-verse-ref {
   margin: 2px 0;
   font-size: 0.8em;
   font-style: italic;
@@ -248,6 +305,21 @@
   background: rgba(78,106,255,0.22);
   color: #c0ccff;
 }
+
+/* Center alignment guide lines — shown only while the fine center-line
+   snap (independent per axis) is actually engaged during a drag, giving a
+   Keynote-style "you're centered" visual cue rather than the always-on
+   9-zone grid this replaced. */
+.canvas-center-guide {
+  position: absolute;
+  background: #4e6aff;
+  box-shadow: 0 0 4px rgba(78,106,255,0.8);
+  pointer-events: none;
+  z-index: 6;
+}
+.canvas-center-guide[hidden] { display: none; }
+.canvas-center-guide-v { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
+.canvas-center-guide-h { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); }
 
 /* Zone hint positions */
 .canvas-zh-center      { top: 20%; left: 15%; right: 15%; bottom: 20%; }
