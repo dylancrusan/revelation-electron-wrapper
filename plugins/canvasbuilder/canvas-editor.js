@@ -171,7 +171,23 @@ function updateCanvasScale(stageEl) {
   const el = stageEl || (canvasEl && canvasEl.querySelector('.canvas-stage'));
   if (!el) return;
   const w = el.offsetWidth;
-  if (w > 0) el.style.fontSize = (w / 1920 * 100) + 'px';
+  // .canvas-stage used to be mis-sized (width:100% fighting max-height meant
+  // it rendered wider than true 16:9, e.g. 788px instead of the correct
+  // 624px at one measured window size) — that bug was fixed in the stage's
+  // CSS, but it means `w` here is now smaller than before, so this formula's
+  // base divisor needed recalibrating too.
+  //
+  // Calibrate against on-screen pixel width (getBoundingClientRect), not
+  // getComputedStyle font-size: the local stage and the real iframe now
+  // occupy the exact same physical box (post aspect-ratio fix), so their
+  // rendered on-screen sizes are directly comparable. getComputedStyle is
+  // NOT comparable this way — the real renderer's declared font-size is in
+  // reveal.js's own design space, before reveal's internal `transform:
+  // scale()` on `.slides`, and chasing that mismatch made things worse.
+  // Measured directly: the plain w/1920*100 formula renders headings a
+  // uniform ~1.128x wider on-screen than the real renderer, across h1/h3/h6
+  // alike — this divisor corrects for that.
+  if (w > 0) el.style.fontSize = (w / 1920 * 100 / 1.128) + 'px';
 }
 
 // Per-block style: styling metadata for one canvas text block, stored as an

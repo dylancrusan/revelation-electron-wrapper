@@ -84,7 +84,8 @@
 .canvas-stage {
   position: relative;
   aspect-ratio: 16 / 9;
-  width: 100%;
+  height: 100%;
+  width: auto;
   max-width: 100%;
   max-height: 100%;
   border-radius: 6px;
@@ -163,12 +164,20 @@
   width: 100%;
   font-family: 'Source Sans Pro', sans-serif;
 }
-.canvas-h1 { font-size: 2.2em; font-weight: 700; line-height: 1.1; margin: 0 0 4px; }
-.canvas-h2 { font-size: 1.5em; font-weight: 600; line-height: 1.2; margin: 0 0 3px; }
-.canvas-h3 { font-size: 1.1em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
-.canvas-h4 { font-size: 1em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
-.canvas-h5 { font-size: 0.9em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
-.canvas-h6 { font-size: 0.8em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
+/* These em multipliers are calibrated to match the real theme's actual
+   heading sizes (revelation/css/source's --r-heading1-size..4-size, plus
+   .reveal h5/h6) — not arbitrary values of their own. They used to be
+   unrelated numbers (h3 was 1.1em here vs. the real theme's 2.2em, exactly
+   half), which went unnoticed while every block was always a fixed-width
+   80%/48% box regardless of font size. Now that a block's box shrinks to
+   fit its text, any size mismatch here directly becomes a wrong-sized
+   selection outline, so this has to track the real theme's scale. */
+.canvas-h1 { font-size: 2.8em; font-weight: 700; line-height: 1.1; margin: 0 0 4px; }
+.canvas-h2 { font-size: 2.4em; font-weight: 600; line-height: 1.2; margin: 0 0 3px; }
+.canvas-h3 { font-size: 2.2em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
+.canvas-h4 { font-size: 2em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
+.canvas-h5 { font-size: 1.6em; font-weight: 400; line-height: 1.3; margin: 0 0 2px; }
+.canvas-h6 { font-size: 0.67em; font-weight: 600; line-height: 1.3; margin: 0 0 2px; }
 .canvas-p  { font-size: 0.85em; line-height: 1.4; margin: 0 0 2px; }
 .canvas-ul { margin: 0 0 2px; }
 .canvas-li { font-size: 0.85em; line-height: 1.4; margin: 0; display: block; }
