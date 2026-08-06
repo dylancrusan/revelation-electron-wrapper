@@ -265,6 +265,19 @@
       this.builderDropHookReady = true;
     },
 
+    async getBuilderExtensions(ctx) {
+      if (!isBuilderPage(this.context) || !ctx?.host) return [];
+      try {
+        const mod = await import('./builder-backgrounds.js');
+        return typeof mod.getBuilderExtensions === 'function'
+          ? mod.getBuilderExtensions(ctx)
+          : [];
+      } catch (err) {
+        console.error('[addmedia] Failed to load builder-backgrounds module:', err);
+        return [];
+      }
+    },
+
     getContentCreators(pres) {
       return [
         {

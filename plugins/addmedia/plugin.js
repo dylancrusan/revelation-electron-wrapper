@@ -293,7 +293,7 @@ const getPdfPageSize = async (cfg, pdfPath) => {
 const addMissingMediaPlugin = {
   clientHookJS: 'client.js',
   priority: 94,
-  version: '1.0.6',
+  version: '1.0.10',
   configTemplate: [
     { name: 'pdftoppmPath', type: 'string', description: 'Path to pdftoppm binary', default: '' },
     { name: 'pdfinfoPath', type: 'string', description: 'Path to pdfinfo binary', default: '' }
