@@ -134,6 +134,30 @@
   outline-color: rgba(148,163,184,0.85);
 }
 
+/* Corner resize handles — rendered only for a single, unlocked selection
+   (see renderBlocksLayer in canvas-editor.js). ::after widens the hit area
+   well past the visible 8px square, mirroring .col-resize-handle::after in
+   http_admin/builder.css — small corner squares on a letterboxed stage need
+   a forgiving hit target. */
+.canvas-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1.5px solid rgba(78,106,255,0.85);
+  border-radius: 2px;
+  z-index: 5;
+}
+.canvas-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.canvas-resize-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.canvas-resize-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.canvas-resize-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.canvas-resize-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+
 /* Layout zone positions — each sizes to its own content (matching the real
    renderer's .revelation-block rules in revelation/css/source/custom/
    layouts.scss) rather than always claiming a fixed 80%/48% span. */

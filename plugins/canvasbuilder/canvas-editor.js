@@ -86,7 +86,10 @@ function mutateCurrentSlide(label, mutator) {
 let canvasEl = null;
 let canvasActive = false;
 let lastRenderedSlideKey = null;
-let selectedBlockId = 1;
+// Never empty while a slide exists — there is no "nothing selected" state.
+// The last element is the "primary" block (what every single-block reader
+// like getBlockStyle/getResolvedBlockPosition operates on).
+let selectedBlockIds = [1];
 let editingBlockId = null;
 
 const LAYOUT_ZONES = [
@@ -231,7 +234,20 @@ const BLOCK_STYLE_DEFAULTS = Object.freeze({
   x: '', y: '',
   // Prevents drag/edit/delete in the canvas builder. Editor-only concept —
   // never rendered on the real compiled slide, so no compiler changes needed.
-  locked: false
+  locked: false,
+  // Blocks sharing a non-empty groupId select/drag as one unit. Editor-only,
+  // like locked — grouping has no visual effect on the compiled slide.
+  groupId: '',
+  // Degrees ('' = 0/no rotation) and horizontal/vertical flip. Rendered as
+  // part of the same transform that positions a freeform block — see
+  // setBlockStyleProp's rotate/flipH/flipV branch, which always promotes a
+  // block to freeform (explicit x/y) before writing any of these, so no
+  // renderer ever has to compose this on top of an unknown zone transform.
+  rotate: '', flipH: false, flipV: false,
+  // Explicit size, % of stage (empty = auto/content-sized, both-or-nothing
+  // like x/y). Mirrors x/y's unit so one drag/typed-field/compiler pipeline
+  // handles both. constrain is editor-only checkbox state (not rendered).
+  width: '', height: '', constrain: false
 });
 
 // Split on commas that separate key=value pairs, but not commas nested
@@ -266,6 +282,10 @@ function parseBlockStyleArgs(argsStr) {
     else if (k === 'box-bg') out.boxBg = v;
     else if (k === 'box-border') out.boxBorder = v;
     else if (k === 'locked') out.locked = v === '1';
+    else if (k === 'group') out.groupId = v;
+    else if (k === 'flip-h') out.flipH = v === '1';
+    else if (k === 'flip-v') out.flipV = v === '1';
+    else if (k === 'constrain') out.constrain = v === '1';
     else if (k in out) out[k] = v;
   });
   return out;
@@ -286,6 +306,16 @@ function serializeBlockStyleArgs(style) {
     s += ',x=' + style.x + ',y=' + style.y;
   }
   if (style.locked) s += ',locked=1';
+  if (style.groupId) s += ',group=' + style.groupId;
+  if (style.rotate !== '' && style.rotate != null && parseFloat(style.rotate) !== 0) {
+    s += ',rotate=' + style.rotate;
+  }
+  if (style.flipH) s += ',flip-h=1';
+  if (style.flipV) s += ',flip-v=1';
+  if (style.width !== '' && style.width != null && style.height !== '' && style.height != null) {
+    s += ',width=' + style.width + ',height=' + style.height;
+  }
+  if (style.constrain) s += ',constrain=1';
   return s;
 }
 
@@ -353,12 +383,39 @@ function findBlock(blocks, id) {
   return blocks.find(b => b.id === id) || blocks[0];
 }
 
+// All block ids sharing a group (including the one that named it), for
+// making a click on any member select/drag the whole group together.
+function getGroupMemberIds(blocks, groupId) {
+  return blocks.filter(b => b.style.groupId === groupId).map(b => b.id);
+}
+
+// Block 1 without its own explicit zone falls back to the legacy slide-wide
+// top-matter zone macro (see resolveBlockZone) — but serializeBlockStyleArgs
+// always writes an explicit zone= once a block has *any* explicit style.
+// Any mutation that gives block 1 its first explicit style (without itself
+// setting x/y, which would supersede zone entirely) must carry the
+// top-matter zone forward first, or it silently jumps to center the moment
+// it becomes explicit.
+function preserveBlock1Zone(block, slideTop) {
+  if (block.id === 1 && (!block.style.zone || block.style.zone === 'center')) {
+    const zoneFromLayout = parseLayoutId(slideTop);
+    if (zoneFromLayout) block.style.zone = zoneFromLayout;
+  }
+}
+
 // True once a block has been dragged or moved via the Layout Zone grid —
 // from then on its position is freeform (x/y percentages), not one of the
 // 9 preset zones.
 function hasExplicitPosition(block) {
   return block.style.x !== '' && block.style.x != null &&
          block.style.y !== '' && block.style.y != null;
+}
+
+// True once a block has an explicit stored width/height (via a resize
+// handle drag or the Size fields) — until then it's auto-sized to content.
+function hasExplicitSize(block) {
+  return block.style.width !== '' && block.style.width != null &&
+         block.style.height !== '' && block.style.height != null;
 }
 
 // Resolve a block's on-stage anchor point as {x, y} percentages. Freeform
@@ -392,13 +449,17 @@ function findFreePosition(blocks, slideTop, startX, startY, excludeId) {
 }
 
 function getSelectedBlockId() {
-  return selectedBlockId;
+  return selectedBlockIds[selectedBlockIds.length - 1];
+}
+
+function getSelectedBlockIds() {
+  return selectedBlockIds.slice();
 }
 
 function getBlockStyle() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
-  return findBlock(blocks, selectedBlockId).style;
+  return findBlock(blocks, getSelectedBlockId()).style;
 }
 
 function setBlockStyleProp(key, value) {
@@ -408,7 +469,7 @@ function setBlockStyleProp(key, value) {
   // blockType and textBg affect the slide body/top differently
   if (key === 'blockType') {
     const blocks = parseBodyBlocks(slide.body);
-    const block = findBlock(blocks, selectedBlockId);
+    const block = findBlock(blocks, getSelectedBlockId());
     block.content = applyBodyBlockType(block.content, value);
     const newBody = serializeBodyBlocks(blocks);
     mutateCurrentSlide('Change block type', () => ({ body: newBody }));
@@ -422,14 +483,32 @@ function setBlockStyleProp(key, value) {
     return;
   }
 
+  // Rotate/flip must always promote the block to freeform (explicit x/y)
+  // first, so every renderer only ever composes
+  // translate(-50%,-50%) rotate(...) scale(...) on top of a *known* base
+  // transform — never an unresolved zone-class transform underneath.
+  if (key === 'rotate' || key === 'flipH' || key === 'flipV') {
+    const blocks = parseBodyBlocks(slide.body);
+    const block = findBlock(blocks, getSelectedBlockId());
+    const patch = { [key]: value };
+    if (!hasExplicitPosition(block)) {
+      const pos = resolveBlockPosition(block, slide.top);
+      patch.x = pos.x.toFixed(2);
+      patch.y = pos.y.toFixed(2);
+    }
+    block.style = Object.assign({}, block.style, patch);
+    block.explicit = true;
+    const newBody = serializeBodyBlocks(blocks);
+    mutateCurrentSlide('Update block style', () => ({ body: newBody }));
+    renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
+    return;
+  }
+
   const blocks = parseBodyBlocks(slide.body);
-  const block = findBlock(blocks, selectedBlockId);
+  const block = findBlock(blocks, getSelectedBlockId());
   block.style = Object.assign({}, block.style, { [key]: value });
   block.explicit = true;
-  if (block.id === 1 && (!block.style.zone || block.style.zone === 'center')) {
-    const zoneFromLayout = parseLayoutId(slide.top);
-    if (zoneFromLayout) block.style.zone = zoneFromLayout;
-  }
+  preserveBlock1Zone(block, slide.top);
   const newBody = serializeBodyBlocks(blocks);
   mutateCurrentSlide('Update block style', () => ({ body: newBody }));
   renderCanvas();
@@ -443,7 +522,7 @@ function setBlockStyleProp(key, value) {
 function getBodyInfo() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
-  const block = findBlock(blocks, selectedBlockId);
+  const block = findBlock(blocks, getSelectedBlockId());
   return {
     blockType: block ? detectBodyBlockType(block.content) : 'p',
     textBg:    slide ? detectTextBg(slide.top) : '',
@@ -459,7 +538,7 @@ function applyLayout(zoneId, blockId) {
   if (!slide) return;
   const zone = LAYOUT_ZONES.find(z => z.id === zoneId);
   if (!zone) return;
-  const targetId = blockId != null ? blockId : selectedBlockId;
+  const targetId = blockId != null ? blockId : getSelectedBlockId();
 
   const blocks = parseBodyBlocks(slide.body);
   const block = findBlock(blocks, targetId);
@@ -477,15 +556,9 @@ function applyLayout(zoneId, blockId) {
     if (zone.macro) top = top ? top + '\n' + zone.macro : zone.macro;
     mutation.top = top;
   }
-  selectedBlockId = block.id;
+  selectedBlockIds = [block.id];
   mutateCurrentSlide('Apply layout', () => mutation);
-  renderCanvas();
-  // Same live-preview sync a drag gesture gets — without this, the Layout
-  // Zone grid was the one way left to move a block where the outline
-  // updated instantly but the real rendered text didn't until the next
-  // save, since this function (unlike wireBlockEvents' drag handlers)
-  // never told the preview iframe anything moved.
-  sendCanvasCommand('moveBlock', { id: block.id, x: zone.ax, y: zone.ay });
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
 }
 
 // Freeform drop position from a drag gesture (percent of stage, anchored at
@@ -504,9 +577,27 @@ function setBlockPosition(id, px, py, zoneId) {
   });
   block.explicit = true;
   const newBody = serializeBodyBlocks(blocks);
-  selectedBlockId = block.id;
+  selectedBlockIds = [block.id];
   mutateCurrentSlide('Move text block', () => ({ body: newBody }));
-  renderCanvas();
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
+}
+
+// Batched position commit for a group-drag or Distribute: several blocks'
+// x/y in one parse → mutate-N → serialize → one mutateCurrentSlide call,
+// instead of one call per block (which would still collapse into a single
+// undo step via the debounce, but this keeps it to one document mutation).
+function setBlockPositions(moves) { // moves: [{id, x, y}]
+  const slide = getCurrentSlide();
+  if (!slide || !moves.length) return;
+  const blocks = parseBodyBlocks(slide.body);
+  moves.forEach(({ id, x, y }) => {
+    const block = findBlock(blocks, id);
+    block.style = Object.assign({}, block.style, { x: x.toFixed(2), y: y.toFixed(2), zone: '' });
+    block.explicit = true;
+  });
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Move blocks', () => ({ body: newBody }));
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
 }
 
 // Typed X/Y from the Arrange tab's Position fields. Unlike a drag (which
@@ -526,8 +617,29 @@ function setBlockPositionFields(id, x, y) {
   block.explicit = true;
   const newBody = serializeBodyBlocks(blocks);
   mutateCurrentSlide('Set block position', () => ({ body: newBody }));
-  renderCanvas();
-  sendCanvasCommand('moveBlock', { id, x: Number(x), y: Number(y) });
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
+}
+
+// Commits a resize (from a corner-handle drag or the typed Width/Height
+// fields). x/y are the block's own anchor center, same convention as
+// setBlockPosition — a resize always re-derives and writes them too since,
+// like rotate/flip, an explicit size only ever makes sense on a freeform
+// (explicit x/y) block.
+function setBlockSize(id, x, y, width, height) {
+  const slide = getCurrentSlide();
+  if (!slide) return;
+  const blocks = parseBodyBlocks(slide.body);
+  const block = findBlock(blocks, id);
+  block.style = Object.assign({}, block.style, {
+    x: x.toFixed(2), y: y.toFixed(2),
+    width: width.toFixed(2), height: height.toFixed(2),
+    zone: ''
+  });
+  block.explicit = true;
+  const newBody = serializeBodyBlocks(blocks);
+  selectedBlockIds = [id];
+  mutateCurrentSlide('Resize block', () => ({ body: newBody }));
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
 }
 
 // Effective on-stage position for a block, for display in the Arrange tab's
@@ -537,7 +649,7 @@ function setBlockPositionFields(id, x, y) {
 function getResolvedBlockPosition() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
-  const block = findBlock(blocks, selectedBlockId);
+  const block = findBlock(blocks, getSelectedBlockId());
   return resolveBlockPosition(block, slide ? slide.top : '');
 }
 
@@ -613,8 +725,28 @@ function removeBg() {
   renderCanvas();
 }
 
-function selectBlock(id) {
-  selectedBlockId = id;
+// opts.additive: shift/ctrl/cmd-click — extends or toggles the selection
+// instead of replacing it. Clicking any member of a group selects/toggles
+// every block sharing its groupId together, so a group always acts as one
+// selection unit no matter which member was actually clicked.
+function selectBlock(id, opts) {
+  const additive = !!(opts && opts.additive);
+  const slide = getCurrentSlide();
+  const blocks = parseBodyBlocks(slide ? slide.body : '');
+  const block = findBlock(blocks, id);
+  const targetIds = block.style.groupId ? getGroupMemberIds(blocks, block.style.groupId) : [id];
+
+  if (additive) {
+    if (targetIds.every(t => selectedBlockIds.includes(t))) {
+      selectedBlockIds = selectedBlockIds.filter(s => !targetIds.includes(s));
+      if (!selectedBlockIds.length) selectedBlockIds = [id]; // never fully empty
+    } else {
+      selectedBlockIds = Array.from(new Set([...selectedBlockIds, ...targetIds]));
+    }
+  } else {
+    selectedBlockIds = targetIds.slice();
+  }
+
   // Toggle the outline class on the existing elements rather than calling
   // renderCanvas() (which rebuilds the whole block layer). A real
   // double-click is two separate clicks in quick succession; if the first
@@ -624,10 +756,84 @@ function selectBlock(id) {
   // pure, no-rebuild DOM update so the element stays put across both clicks.
   if (canvasEl) {
     canvasEl.querySelectorAll('.canvas-text-block').forEach(el => {
-      el.classList.toggle('is-selected', el.dataset.blockId === String(id));
+      el.classList.toggle('is-selected', selectedBlockIds.includes(Number(el.dataset.blockId)));
     });
   }
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
+}
+
+// groupId is deterministic (lowest member id) rather than a separate
+// counter, so it's unique per group without needing any new persisted
+// state. If that specific block is later deleted, the string persists as
+// an opaque (still-unique) label on the rest of the group.
+function groupBlocks(ids) {
+  if (ids.length < 2) return;
+  const slide = getCurrentSlide();
+  if (!slide) return;
+  const blocks = parseBodyBlocks(slide.body);
+  const groupId = String(Math.min(...ids));
+  ids.forEach(id => {
+    const block = findBlock(blocks, id);
+    preserveBlock1Zone(block, slide.top);
+    block.style = Object.assign({}, block.style, { groupId });
+    block.explicit = true;
+  });
+  const newBody = serializeBodyBlocks(blocks);
+  selectedBlockIds = ids.slice();
+  mutateCurrentSlide('Group blocks', () => ({ body: newBody }));
+  renderCanvas(); // no sendCanvasCommand — grouping has no rendered effect at all
+}
+
+function ungroupSelectedBlocks() {
+  const slide = getCurrentSlide();
+  if (!slide) return;
+  const blocks = parseBodyBlocks(slide.body);
+  const groupId = findBlock(blocks, getSelectedBlockId()).style.groupId;
+  if (!groupId) return;
+  blocks.forEach(b => { if (b.style.groupId === groupId) b.style.groupId = ''; });
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Ungroup blocks', () => ({ body: newBody }));
+  renderCanvas();
+}
+
+// Equal-gap distribution along one axis, measured from actual rendered
+// boxes (consistent with how drag/snap already treats DOM measurement as
+// authoritative for position). The first and last blocks along the axis
+// anchor the span and never move; only the middle ones are repositioned.
+function distributeBlocks(ids, axis) { // axis: 'h' | 'v'
+  const eligible = ids.filter(id => !getStyleForBlockId(id).locked);
+  if (eligible.length < 3) return;
+  const stage = canvasEl && canvasEl.querySelector('.canvas-stage');
+  if (!stage) return;
+  const stageRect = stage.getBoundingClientRect();
+
+  const rects = eligible.map(id => {
+    const el = canvasEl.querySelector('.canvas-text-block[data-block-id="' + id + '"]');
+    const r = el.getBoundingClientRect();
+    return { id, left: r.left - stageRect.left, top: r.top - stageRect.top, width: r.width, height: r.height };
+  });
+
+  const sorted = rects.slice().sort((a, b) => axis === 'h' ? a.left - b.left : a.top - b.top);
+  const first = sorted[0], last = sorted[sorted.length - 1];
+  const totalSpan = axis === 'h'
+    ? last.left - (first.left + first.width)
+    : last.top  - (first.top  + first.height);
+  const middleSize = sorted.slice(1, -1).reduce((sum, r) => sum + (axis === 'h' ? r.width : r.height), 0);
+  const gap = (totalSpan - middleSize) / (sorted.length - 1);
+
+  const moves = [];
+  let cursor = axis === 'h' ? first.left + first.width : first.top + first.height;
+  sorted.slice(1, -1).forEach(r => {
+    const size = axis === 'h' ? r.width : r.height;
+    const centerPx = cursor + gap + size / 2;
+    const pct = (centerPx / (axis === 'h' ? stageRect.width : stageRect.height)) * 100;
+    const otherPct = axis === 'h'
+      ? ((r.top + r.height / 2) / stageRect.height) * 100
+      : ((r.left + r.width / 2) / stageRect.width) * 100;
+    moves.push(axis === 'h' ? { id: r.id, x: pct, y: otherPct } : { id: r.id, x: otherPct, y: pct });
+    cursor = cursor + gap + size;
+  });
+  setBlockPositions(moves);
 }
 
 function addTextBlock() {
@@ -643,7 +849,7 @@ function addTextBlock() {
     content: 'New text'
   });
   const newBody = serializeBodyBlocks(blocks);
-  selectedBlockId = newId;
+  selectedBlockIds = [newId];
   mutateCurrentSlide('Add text block', () => ({ body: newBody }));
   renderCanvas();
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
@@ -653,7 +859,7 @@ function canDeleteSelectedBlock() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
   if (blocks.length <= 1) return false;
-  return !findBlock(blocks, selectedBlockId).style.locked;
+  return !findBlock(blocks, getSelectedBlockId()).style.locked;
 }
 
 function deleteSelectedBlock() {
@@ -661,10 +867,11 @@ function deleteSelectedBlock() {
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
   if (blocks.length <= 1) return;
-  if (findBlock(blocks, selectedBlockId).style.locked) return;
-  const remaining = blocks.filter(b => b.id !== selectedBlockId);
+  const id = getSelectedBlockId();
+  if (findBlock(blocks, id).style.locked) return;
+  const remaining = blocks.filter(b => b.id !== id);
   const newBody = serializeBodyBlocks(remaining);
-  selectedBlockId = remaining[0].id;
+  selectedBlockIds = [remaining[0].id];
   mutateCurrentSlide('Delete text block', () => ({ body: newBody }));
   renderCanvas();
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
@@ -887,7 +1094,7 @@ function renderCanvas() {
   if (lastRenderedSlideKey !== null && lastRenderedSlideKey !== slideKey) {
     editingBlockId = null;
     exitEditModeUI();
-    selectedBlockId = 1;
+    selectedBlockIds = [1];
   }
   lastRenderedSlideKey = slideKey;
 
@@ -954,16 +1161,40 @@ function renderCanvas() {
   // don't yank the shared editor's anchor out from under an open edit session.
   if (editingBlockId === null) {
     const blocks = parseBodyBlocks(slide.body);
-    if (!blocks.some(b => b.id === selectedBlockId)) {
-      selectedBlockId = blocks[0].id;
-    }
+    // Drop any selected id(s) that no longer exist (e.g. after undo/redo or
+    // a delete elsewhere) rather than resetting the whole selection —
+    // preserves the rest of a multi-selection when only one member vanished.
+    selectedBlockIds = selectedBlockIds.filter(id => blocks.some(b => b.id === id));
+    if (!selectedBlockIds.length) selectedBlockIds = [blocks[0].id];
     renderBlocksLayer(blocks, slide.top);
+    resyncPreviewBlocks(blocks);
 
     const deleteBlockBtn = canvasEl.querySelector('.canvas-delete-block-btn');
     if (deleteBlockBtn) deleteBlockBtn.hidden = !canDeleteSelectedBlock();
   }
 
   navigateCanvas();
+}
+
+// Full live-preview resync: sends every explicit block's current style and
+// the whole slide's DOM order to the iframe. Called from renderCanvas()
+// itself (which fires on *any* document change) rather than only from the
+// mutation functions below, because undo/redo goes through the host's own
+// undo-manager and never calls setBlockPosition/setBlockStyleProp/etc. at
+// all — those functions' own targeted sendCanvasCommand calls give snappier
+// per-edit feedback, but only this catch-all guarantees the iframe can't be
+// left showing a stale (un-reverted) position/size/rotation after an undo.
+// Skips non-explicit blocks (matches serializeBodyBlocks' own convention):
+// an untouched block's "style" is just BLOCK_STYLE_DEFAULTS, and forcing
+// that onto the iframe would stomp the real theme's own color/font with
+// this plugin's placeholder defaults on every single slide.
+function resyncPreviewBlocks(blocks) {
+  const explicitBlocks = blocks.filter(b => b.explicit);
+  if (!explicitBlocks.length) return;
+  explicitBlocks.forEach(block => {
+    sendCanvasCommand('blockStyle', { id: block.id, style: block.style });
+  });
+  sendCanvasCommand('reorderBlocks', { ids: blocks.map(b => b.id) });
 }
 
 function renderBlocksLayer(blocks, slideTop) {
@@ -983,9 +1214,23 @@ function renderBlocksLayer(blocks, slideTop) {
       const pos = resolveBlockPosition(block, slideTop);
       el.style.top = pos.y + '%';
       el.style.left = pos.x + '%';
-      el.style.transform = 'translate(-50%, -50%)';
+      let transform = 'translate(-50%, -50%)';
+      const deg = parseFloat(block.style.rotate);
+      if (Number.isFinite(deg) && deg !== 0) transform += ' rotate(' + deg + 'deg)';
+      if (block.style.flipH || block.style.flipV) {
+        transform += ' scale(' + (block.style.flipH ? -1 : 1) + ', ' + (block.style.flipV ? -1 : 1) + ')';
+      }
+      el.style.transform = transform;
+      if (hasExplicitSize(block)) {
+        // max-width:none is required alongside width — the zone class's own
+        // max-width cap still applies to an inline width otherwise, so a
+        // wider explicit width would silently do nothing without this.
+        el.style.width = block.style.width + '%';
+        el.style.height = block.style.height + '%';
+        el.style.maxWidth = 'none';
+      }
     }
-    if (block.id === selectedBlockId) el.classList.add('is-selected');
+    if (selectedBlockIds.includes(block.id)) el.classList.add('is-selected');
     if (block.style.locked) el.classList.add('is-locked');
     el.dataset.blockId = String(block.id);
 
@@ -994,8 +1239,157 @@ function renderBlocksLayer(blocks, slideTop) {
     inner.innerHTML = renderBodyPreview(block.content);
     el.appendChild(inner);
 
+    // Resize handles only for a single, unlocked selection — a multi-
+    // selection shows plain outlines with no handles (whole-selection
+    // bounding-box resize is out of scope for this phase).
+    if (selectedBlockIds.length === 1 && selectedBlockIds[0] === block.id && !block.style.locked) {
+      ['nw', 'ne', 'sw', 'se'].forEach(corner => renderResizeHandle(el, block.id, corner));
+    }
+
     layer.appendChild(el);
     wireBlockEvents(el, block.id);
+  });
+}
+
+const RESIZE_MIN_SIZE = 24; // px — floor for both dimensions during a handle drag
+
+function renderResizeHandle(blockEl, blockId, corner) {
+  const handle = document.createElement('div');
+  handle.className = 'canvas-resize-handle canvas-resize-' + corner;
+  blockEl.appendChild(handle);
+  wireResizeHandle(handle, blockId, corner);
+}
+
+// Corner-drag resize. Structurally parallel to wireBlockEvents' move-drag:
+// mousedown captures a start snapshot, mousemove live-patches inline
+// left/top/width/height on the block element, mouseup reads the final
+// on-screen rect and commits via setBlockSize. Unlike a typed Width/Height
+// edit (which keeps the block's center fixed, see commitSizeFields in
+// builder.js), a handle drag keeps the *opposite corner* fixed — standard
+// opposite-anchor resize math, one branch per corner.
+function wireResizeHandle(handleEl, blockId, corner) {
+  handleEl.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    // Critical: without this, the mousedown also bubbles to the parent
+    // block's own mousedown handler (wireBlockEvents), which would start a
+    // move-drag on the same gesture.
+    e.preventDefault();
+    e.stopPropagation();
+
+    const stage = canvasEl.querySelector('.canvas-stage');
+    const blockEl = handleEl.parentElement;
+    if (!stage || !blockEl) return;
+
+    const stageRect = stage.getBoundingClientRect();
+    const startRect = blockEl.getBoundingClientRect();
+    const startLeft = startRect.left - stageRect.left;
+    const startTop = startRect.top - stageRect.top;
+    const startWidth = startRect.width;
+    const startHeight = startRect.height;
+    const startAspect = startWidth / startHeight;
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+    const constrain = !!getStyleForBlockId(blockId).constrain;
+    const baseStyle = getStyleForBlockId(blockId);
+    let resizing = false;
+
+    function onMouseMove(e) {
+      const dx = e.clientX - startMouseX;
+      const dy = e.clientY - startMouseY;
+      if (!resizing && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) resizing = true;
+      if (!resizing) return;
+
+      let newLeft = startLeft, newTop = startTop, newWidth = startWidth, newHeight = startHeight;
+      if (corner === 'se') {
+        newWidth  = startWidth  + dx;
+        newHeight = startHeight + dy;
+      } else if (corner === 'sw') {
+        newWidth  = startWidth  - dx;
+        newHeight = startHeight + dy;
+        newLeft   = startLeft   + dx;
+      } else if (corner === 'ne') {
+        newWidth  = startWidth  + dx;
+        newHeight = startHeight - dy;
+        newTop    = startTop    + dy;
+      } else { // nw
+        newWidth  = startWidth  - dx;
+        newHeight = startHeight - dy;
+        newLeft   = startLeft   + dx;
+        newTop    = startTop    + dy;
+      }
+
+      newWidth  = Math.max(RESIZE_MIN_SIZE, newWidth);
+      newHeight = Math.max(RESIZE_MIN_SIZE, newHeight);
+
+      if (constrain) {
+        // Whichever axis moved proportionally more drives the other, then
+        // left/top are re-derived from the corner's fixed-anchor rule using
+        // the now-locked dimensions.
+        if (Math.abs(newWidth / startWidth - 1) > Math.abs(newHeight / startHeight - 1)) {
+          newHeight = Math.max(RESIZE_MIN_SIZE, newWidth / startAspect);
+        } else {
+          newWidth = Math.max(RESIZE_MIN_SIZE, newHeight * startAspect);
+        }
+        if (corner === 'sw' || corner === 'nw') newLeft = startLeft + startWidth  - newWidth;
+        if (corner === 'ne' || corner === 'nw') newTop  = startTop  + startHeight - newHeight;
+      }
+
+      // Clamp to stage bounds — re-read the stage rect each move for
+      // robustness, matching wireBlockEvents' own move-drag.
+      const sr = stage.getBoundingClientRect();
+      newLeft = Math.max(0, newLeft);
+      newTop  = Math.max(0, newTop);
+      if (newLeft + newWidth  > sr.width)  newWidth  = sr.width  - newLeft;
+      if (newTop  + newHeight > sr.height) newHeight = sr.height - newTop;
+
+      blockEl.style.position  = 'absolute';
+      blockEl.style.left      = newLeft + 'px';
+      blockEl.style.top       = newTop + 'px';
+      blockEl.style.width     = newWidth + 'px';
+      blockEl.style.height    = newHeight + 'px';
+      blockEl.style.maxWidth  = 'none';
+      blockEl.style.transform = 'none';
+
+      // Live-sync the real preview the same way a move-drag streams
+      // moveBlock every frame — otherwise the resize is invisible in the
+      // iframe until the handle is released.
+      const centerXPct = ((newLeft + newWidth  / 2) / sr.width)  * 100;
+      const centerYPct = ((newTop  + newHeight / 2) / sr.height) * 100;
+      sendCanvasCommand('blockStyle', {
+        id: blockId,
+        style: Object.assign({}, baseStyle, {
+          x: centerXPct.toFixed(2), y: centerYPct.toFixed(2),
+          width: ((newWidth / sr.width) * 100).toFixed(2),
+          height: ((newHeight / sr.height) * 100).toFixed(2)
+        })
+      });
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (!resizing) return; // plain click on the handle, no drag — no-op
+
+      const sr = stage.getBoundingClientRect();
+      const br = blockEl.getBoundingClientRect();
+      const centerXPct = ((br.left + br.width  / 2 - sr.left) / sr.width)  * 100;
+      const centerYPct = ((br.top  + br.height / 2 - sr.top)  / sr.height) * 100;
+      const widthPct  = (br.width  / sr.width)  * 100;
+      const heightPct = (br.height / sr.height) * 100;
+
+      blockEl.style.position  = '';
+      blockEl.style.left      = '';
+      blockEl.style.top       = '';
+      blockEl.style.width     = '';
+      blockEl.style.height    = '';
+      blockEl.style.maxWidth  = '';
+      blockEl.style.transform = '';
+
+      setBlockSize(blockId, centerXPct, centerYPct, widthPct, heightPct);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   });
 }
 
@@ -1055,7 +1449,7 @@ function wireStaticEvents(container) {
       if (!textarea.hidden) {
         commitEdit(textarea);
       } else {
-        enterEditMode(selectedBlockId);
+        enterEditMode(getSelectedBlockId());
       }
     });
 
@@ -1120,7 +1514,20 @@ function wireBlockEvents(blockEl, blockId) {
     if (e.button !== 0) return;
     if (textarea && !textarea.hidden) return;
 
-    const locked = getStyleForBlockId(blockId).locked;
+    // Selection is resolved here, before the drag threshold, so a group-drag
+    // (see below) knows its full member set from the very first mousemove.
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (additive) {
+      selectBlock(blockId, { additive: true });
+    } else if (!selectedBlockIds.includes(blockId)) {
+      selectBlock(blockId);
+    }
+    // else: blockId is already part of an active multi-selection and this is
+    // a plain click on one of its members — leave the selection untouched so
+    // dragging it moves the whole set instead of collapsing to just this one.
+    const dragIds = selectedBlockIds.slice();
+
+    const locked = dragIds.some(id => getStyleForBlockId(id).locked);
     const stageRect = stage.getBoundingClientRect();
     const blockRect = blockEl.getBoundingClientRect();
     offsetX = e.clientX - blockRect.left;
@@ -1131,24 +1538,88 @@ function wireBlockEvents(blockEl, blockId) {
     lastMouseY = e.clientY;
     dragging = false;
 
+    // Group-drag snapshot: every dragged member's element + starting
+    // stage-relative rect, plus the whole set's combined bounding box — used
+    // only when dragIds.length > 1. Only meaningful once dragging actually
+    // starts, but cheap enough to always capture up front.
+    const memberStarts = dragIds
+      .map(id => id === blockId ? blockEl : canvasEl.querySelector('.canvas-text-block[data-block-id="' + id + '"]'))
+      .filter(Boolean)
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        return { el, id: Number(el.dataset.blockId), left: r.left - stageRect.left, top: r.top - stageRect.top, width: r.width, height: r.height };
+      });
+    const groupBounds = memberStarts.reduce((acc, m) => ({
+      left: Math.min(acc.left, m.left), top: Math.min(acc.top, m.top),
+      right: Math.max(acc.right, m.left + m.width), bottom: Math.max(acc.bottom, m.top + m.height)
+    }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+
     function onMouseMove(e) {
       const dx = e.clientX - startMouseX;
       const dy = e.clientY - startMouseY;
 
       if (!dragging && !locked && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
         dragging = true;
-        blockEl.classList.add('is-dragging');
-        LAYOUT_ZONES.forEach(z => blockEl.classList.remove('canvas-zone-' + z.id));
-        blockEl.style.position  = 'absolute';
-        blockEl.style.left      = (blockRect.left - stageRect.left) + 'px';
-        blockEl.style.top       = (blockRect.top  - stageRect.top)  + 'px';
-        blockEl.style.transform = 'none';
-        blockEl.style.width     = blockRect.width + 'px';
+        if (dragIds.length > 1) {
+          memberStarts.forEach(m => {
+            m.el.classList.add('is-dragging');
+            LAYOUT_ZONES.forEach(z => m.el.classList.remove('canvas-zone-' + z.id));
+            m.el.style.position  = 'absolute';
+            m.el.style.left      = m.left + 'px';
+            m.el.style.top       = m.top + 'px';
+            m.el.style.transform = 'none';
+            m.el.style.width     = m.width + 'px';
+          });
+        } else {
+          blockEl.classList.add('is-dragging');
+          LAYOUT_ZONES.forEach(z => blockEl.classList.remove('canvas-zone-' + z.id));
+          blockEl.style.position  = 'absolute';
+          blockEl.style.left      = (blockRect.left - stageRect.left) + 'px';
+          blockEl.style.top       = (blockRect.top  - stageRect.top)  + 'px';
+          blockEl.style.transform = 'none';
+          blockEl.style.width     = blockRect.width + 'px';
+        }
         if (dragHint) dragHint.hidden = true;
       }
 
       if (!dragging) return;
       const sr = stage.getBoundingClientRect();
+
+      if (dragIds.length > 1) {
+        // Snap keyed to the block the user is actually holding (not an
+        // averaged group point, which would fight the cursor), then apply
+        // that one shared delta to every member.
+        const held = memberStarts.find(m => m.id === blockId);
+        let nl = e.clientX - sr.left - offsetX;
+        let nt = e.clientY - sr.top  - offsetY;
+        const heldCenterXPct = ((nl + held.width  / 2) / sr.width)  * 100;
+        const heldCenterYPct = ((nt + held.height / 2) / sr.height) * 100;
+        const snapped = applyDragSnap(heldCenterXPct, heldCenterYPct);
+        const snappedLeft = (snapped.x / 100) * sr.width  - held.width  / 2;
+        const snappedTop  = (snapped.y / 100) * sr.height - held.height / 2;
+        let deltaX = snappedLeft - held.left;
+        let deltaY = snappedTop  - held.top;
+
+        // Clamp the delta against the group's *combined* bounding box, not
+        // each member independently — independent clamping would let
+        // members drift apart from each other once any one hits an edge.
+        deltaX = Math.max(-groupBounds.left, Math.min(deltaX, sr.width  - groupBounds.right));
+        deltaY = Math.max(-groupBounds.top,  Math.min(deltaY, sr.height - groupBounds.bottom));
+
+        memberStarts.forEach(m => {
+          m.el.style.left = (m.left + deltaX) + 'px';
+          m.el.style.top  = (m.top  + deltaY) + 'px';
+          sendCanvasCommand('moveBlock', {
+            id: m.id,
+            x: ((m.left + deltaX + m.width  / 2) / sr.width)  * 100,
+            y: ((m.top  + deltaY + m.height / 2) / sr.height) * 100
+          });
+        });
+        if (guideV) guideV.hidden = snapped.x !== 50;
+        if (guideH) guideH.hidden = snapped.y !== 50;
+        return;
+      }
+
       let nl = e.clientX - sr.left - offsetX;
       let nt = e.clientY - sr.top  - offsetY;
       nl = Math.max(0, Math.min(nl, sr.width  - blockEl.offsetWidth));
@@ -1190,17 +1661,38 @@ function wireBlockEvents(blockEl, blockId) {
       document.removeEventListener('mouseup', onMouseUp);
 
       if (!dragging) {
-        // Plain click, no drag: just select this block.
-        selectBlock(blockId);
+        // Plain click, no drag: selection was already resolved at mousedown.
         return;
       }
 
       dragging = false;
-      blockEl.classList.remove('is-dragging');
       zoneHints.hidden = true;
       if (guideV) guideV.hidden = true;
       if (guideH) guideH.hidden = true;
       if (dragHint) dragHint.hidden = false;
+
+      if (dragIds.length > 1) {
+        const sr = stage.getBoundingClientRect();
+        const moves = memberStarts.map(m => {
+          const r = m.el.getBoundingClientRect();
+          let px = ((r.left + r.width  / 2 - sr.left) / sr.width)  * 100;
+          let py = ((r.top  + r.height / 2 - sr.top)  / sr.height) * 100;
+          px = Math.max(2, Math.min(98, px));
+          py = Math.max(2, Math.min(98, py));
+          m.el.classList.remove('is-dragging');
+          m.el.style.position  = '';
+          m.el.style.left      = '';
+          m.el.style.top       = '';
+          m.el.style.transform = '';
+          m.el.style.width     = '';
+          return { id: m.id, x: px, y: py };
+        });
+        setBlockPositions(moves);
+        if (typeof _onSelectionChange === 'function') _onSelectionChange();
+        return;
+      }
+
+      blockEl.classList.remove('is-dragging');
 
       // Read the box's actual final on-screen center while it's still under
       // the drag's own top/left positioning, before clearing those inline
@@ -1222,11 +1714,12 @@ function wireBlockEvents(blockEl, blockId) {
       blockEl.style.width     = '';
 
       const snapped = applyDragSnap(px, py);
+      // setBlockPosition sends its own confirming blockStyle command to the
+      // preview (a superset of moveBlock — see its comment) — no separate
+      // moveBlock call needed here, and one would be actively harmful: sent
+      // after blockStyle, its handler would wipe the transform/size that
+      // blockStyle just restored.
       setBlockPosition(blockId, snapped.x, snapped.y, snapped.zoneId);
-      // Confirm the final (possibly clamped/snapped) position with the
-      // preview once more — the live moveBlock stream during the drag
-      // should already match, but this guarantees it regardless.
-      sendCanvasCommand('moveBlock', { id: blockId, x: snapped.x, y: snapped.y });
       if (typeof _onSelectionChange === 'function') _onSelectionChange();
     }
 
@@ -1366,7 +1859,16 @@ function splitLineIntoNewBlock() {
   const newId = blocks.reduce((max, b) => Math.max(max, b.id), 0) + 1;
   blocks.push({
     id: newId,
-    style: Object.assign({}, block.style, { zone: '', x: String(newPos.x), y: String(newPos.y) }),
+    // Everything else about the source block's style carries over (color,
+    // font, box fill, etc. — matches the source line's own formatting), but
+    // groupId/rotate/flip/size must not: the split-off box is new,
+    // independent content that shouldn't silently inherit the source's
+    // group membership, orientation, or explicit dimensions.
+    style: Object.assign({}, block.style, {
+      zone: '', x: String(newPos.x), y: String(newPos.y),
+      groupId: '', rotate: '', flipH: false, flipV: false,
+      width: '', height: ''
+    }),
     explicit: true,
     content: extractedMarkdown
   });
@@ -1374,7 +1876,7 @@ function splitLineIntoNewBlock() {
   const newBody = serializeBodyBlocks(blocks);
   editingBlockId = null;
   exitEditModeUI();
-  selectedBlockId = newId;
+  selectedBlockIds = [newId];
   mutateCurrentSlide('Split line into new text block', () => ({ body: newBody }));
   renderCanvas();
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
@@ -1411,7 +1913,8 @@ function isCanvasActive() { return canvasActive; }
 export {
   initCanvasEditor, activateCanvas, deactivateCanvas, isCanvasActive, renderCanvas,
   getBlockStyle, getBodyInfo, setBlockStyleProp, applyLayout, removeBg,
-  getSelectedBlockId, addTextBlock, deleteSelectedBlock, canDeleteSelectedBlock,
-  setBlockPositionFields, getResolvedBlockPosition,
-  bringToFront, sendToBack, bringForward, sendBackward
+  getSelectedBlockId, getSelectedBlockIds, addTextBlock, deleteSelectedBlock, canDeleteSelectedBlock,
+  setBlockPositionFields, getResolvedBlockPosition, getStyleForBlockId,
+  bringToFront, sendToBack, bringForward, sendBackward,
+  groupBlocks, ungroupSelectedBlocks, distributeBlocks, setBlockSize
 };

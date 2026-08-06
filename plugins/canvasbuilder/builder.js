@@ -13,12 +13,18 @@ import {
   setBlockStyleProp,
   getBodyInfo,
   getSelectedBlockId,
+  getSelectedBlockIds,
+  getStyleForBlockId,
   setBlockPositionFields,
   getResolvedBlockPosition,
   bringToFront,
   sendToBack,
   bringForward,
-  sendBackward
+  sendBackward,
+  groupBlocks,
+  ungroupSelectedBlocks,
+  distributeBlocks,
+  setBlockSize
 } from './canvas-editor.js';
 import { renderNotes } from './notes-preview.js';
 
@@ -112,9 +118,12 @@ export function getBuilderExtensions(ctx = {}) {
     const removeBgBtn = document.getElementById('insp-remove-bg-btn');
     if (removeBgBtn) removeBgBtn.hidden = !info.hasBg;
 
-    // Arrange tab — lock state gates Order/Position (Size/Rotate/Group stay
-    // disabled regardless until their own phases wire them up)
+    // Arrange tab — lock state gates Order/Position (Order/Position/Lock stay
+    // primary-block-only during a multi-selection, matching Style/Text tab
+    // controls — not part of the multi-select ask).
     const locked = !!style.locked;
+    const ids = getSelectedBlockIds();
+    const isMulti = ids.length > 1;
     const lockBtn   = document.getElementById('insp-lock-btn');
     const unlockBtn = document.getElementById('insp-unlock-btn');
     if (lockBtn)   lockBtn.disabled   = locked;
@@ -132,6 +141,54 @@ export function getBuilderExtensions(ctx = {}) {
     const pos = getResolvedBlockPosition();
     if (posX && document.activeElement !== posX) { posX.value = Math.round(pos.x * 10) / 10; posX.disabled = locked; }
     if (posY && document.activeElement !== posY) { posY.value = Math.round(pos.y * 10) / 10; posY.disabled = locked; }
+
+    // Rotate / Flip — single-select + unlocked only (no batch-rotate across
+    // a multi-selection in this phase).
+    const rotateDisabled = isMulti || locked;
+    const rotateInput = document.getElementById('insp-rotate-angle');
+    const flipHBtn = document.getElementById('insp-flip-h-btn');
+    const flipVBtn = document.getElementById('insp-flip-v-btn');
+    if (rotateInput && document.activeElement !== rotateInput) {
+      rotateInput.value = style.rotate || 0;
+      rotateInput.disabled = rotateDisabled;
+    }
+    if (flipHBtn) { flipHBtn.disabled = rotateDisabled; flipHBtn.classList.toggle('is-active', !!style.flipH); }
+    if (flipVBtn) { flipVBtn.disabled = rotateDisabled; flipVBtn.classList.toggle('is-active', !!style.flipV); }
+
+    // Size — single-select + unlocked only, same gating as Rotate (no
+    // whole-selection bounding-box resize in this phase).
+    const sizeDisabled = isMulti || locked;
+    const sizeWidthInput = document.getElementById('insp-size-width');
+    const sizeHeightInput = document.getElementById('insp-size-height');
+    const sizeConstrainCheckbox = document.getElementById('insp-size-constrain');
+    if (sizeWidthInput && document.activeElement !== sizeWidthInput) {
+      sizeWidthInput.value = style.width === '' ? '' : Math.round(parseFloat(style.width) * 10) / 10;
+      sizeWidthInput.disabled = sizeDisabled;
+    }
+    if (sizeHeightInput && document.activeElement !== sizeHeightInput) {
+      sizeHeightInput.value = style.height === '' ? '' : Math.round(parseFloat(style.height) * 10) / 10;
+      sizeHeightInput.disabled = sizeDisabled;
+    }
+    if (sizeConstrainCheckbox) {
+      sizeConstrainCheckbox.checked = !!style.constrain;
+      sizeConstrainCheckbox.disabled = sizeDisabled;
+    }
+
+    // Group / Ungroup — Group needs 2+ selected; Ungroup needs the primary
+    // block to currently be in a group.
+    const groupBtn   = document.getElementById('insp-group-btn');
+    const ungroupBtn = document.getElementById('insp-ungroup-btn');
+    if (groupBtn)   groupBtn.disabled   = ids.length < 2;
+    if (ungroupBtn) ungroupBtn.disabled = !style.groupId;
+
+    // Distribute — needs 3+ selected, none locked.
+    const distributeEligible = ids.length >= 3 && !ids.some(id => getStyleForBlockId(id).locked);
+    const distributeDropdownBtn = document.getElementById('insp-distribute-dropdown-btn');
+    const distributeHBtn = document.getElementById('insp-distribute-h-btn');
+    const distributeVBtn = document.getElementById('insp-distribute-v-btn');
+    if (distributeDropdownBtn) distributeDropdownBtn.disabled = !distributeEligible;
+    if (distributeHBtn) distributeHBtn.disabled = !distributeEligible;
+    if (distributeVBtn) distributeVBtn.disabled = !distributeEligible;
   }
 
   // Tabs
@@ -146,7 +203,21 @@ export function getBuilderExtensions(ctx = {}) {
 
   // Align / Distribute dropdowns
   const closeAlignMenu = _wireDropdown(document.getElementById('insp-align-dropdown-btn'), document.getElementById('insp-align-menu'));
-  _wireDropdown(document.getElementById('insp-distribute-dropdown-btn'), document.getElementById('insp-distribute-menu'));
+  const closeDistributeMenu = _wireDropdown(document.getElementById('insp-distribute-dropdown-btn'), document.getElementById('insp-distribute-menu'));
+
+  // Distribute — reads the current selection at click time (the menu can
+  // stay open across selection changes in principle, so don't capture ids
+  // when the dropdown opens).
+  const distributeHBtn = document.getElementById('insp-distribute-h-btn');
+  const distributeVBtn = document.getElementById('insp-distribute-v-btn');
+  if (distributeHBtn) distributeHBtn.addEventListener('click', () => { distributeBlocks(getSelectedBlockIds(), 'h'); closeDistributeMenu(); syncInspector(); });
+  if (distributeVBtn) distributeVBtn.addEventListener('click', () => { distributeBlocks(getSelectedBlockIds(), 'v'); closeDistributeMenu(); syncInspector(); });
+
+  // Group / Ungroup
+  const groupBtn   = document.getElementById('insp-group-btn');
+  const ungroupBtn = document.getElementById('insp-ungroup-btn');
+  if (groupBtn)   groupBtn.addEventListener('click',   () => { groupBlocks(getSelectedBlockIds()); syncInspector(); });
+  if (ungroupBtn) ungroupBtn.addEventListener('click', () => { ungroupSelectedBlocks(); syncInspector(); });
 
   // Order — Front / Back / Forward / Backward
   const orderFrontBtn    = document.getElementById('insp-order-front-btn');
@@ -171,6 +242,70 @@ export function getBuilderExtensions(ctx = {}) {
   }
   if (posXInput) posXInput.addEventListener('change', commitPositionFields);
   if (posYInput) posYInput.addEventListener('change', commitPositionFields);
+
+  // Rotate / Flip — angle commits on blur/Enter like Position; flip buttons
+  // toggle immediately like Bold/Italic/Underline.
+  const rotateInput = document.getElementById('insp-rotate-angle');
+  const flipHBtn = document.getElementById('insp-flip-h-btn');
+  const flipVBtn = document.getElementById('insp-flip-v-btn');
+  if (rotateInput) {
+    rotateInput.addEventListener('change', () => {
+      const deg = parseFloat(rotateInput.value);
+      setBlockStyleProp('rotate', Number.isFinite(deg) ? String(deg) : '');
+      syncInspector();
+    });
+  }
+  if (flipHBtn) {
+    flipHBtn.addEventListener('click', () => {
+      const s = getBlockStyle();
+      setBlockStyleProp('flipH', !s.flipH);
+      syncInspector();
+    });
+  }
+  if (flipVBtn) {
+    flipVBtn.addEventListener('click', () => {
+      const s = getBlockStyle();
+      setBlockStyleProp('flipV', !s.flipV);
+      syncInspector();
+    });
+  }
+
+  // Size — Width/Height commit on blur/Enter like Position. Unlike a
+  // corner-handle drag (which keeps the opposite corner fixed), a typed
+  // edit keeps the block's center fixed and grows/shrinks symmetrically —
+  // matches the translate(-50%,-50%) anchor every freeform block renders
+  // with. When Constrain is checked, editing one field recomputes the
+  // other from the block's current aspect ratio (only possible once the
+  // block already has an explicit size to derive a ratio from).
+  const sizeWidthInput = document.getElementById('insp-size-width');
+  const sizeHeightInput = document.getElementById('insp-size-height');
+  const sizeConstrainCheckbox = document.getElementById('insp-size-constrain');
+  function commitSizeFields(changedField) {
+    if (!sizeWidthInput || !sizeHeightInput) return;
+    let w = parseFloat(sizeWidthInput.value);
+    let h = parseFloat(sizeHeightInput.value);
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+    if (sizeConstrainCheckbox && sizeConstrainCheckbox.checked) {
+      const style = getBlockStyle();
+      const curW = parseFloat(style.width);
+      const curH = parseFloat(style.height);
+      if (Number.isFinite(curW) && curW > 0 && Number.isFinite(curH) && curH > 0) {
+        if (changedField === 'width') h = curH * (w / curW);
+        else w = curW * (h / curH);
+      }
+    }
+    const pos = getResolvedBlockPosition();
+    setBlockSize(getSelectedBlockId(), pos.x, pos.y, w, h);
+    syncInspector();
+  }
+  if (sizeWidthInput) sizeWidthInput.addEventListener('change', () => commitSizeFields('width'));
+  if (sizeHeightInput) sizeHeightInput.addEventListener('change', () => commitSizeFields('height'));
+  if (sizeConstrainCheckbox) {
+    sizeConstrainCheckbox.addEventListener('change', () => {
+      setBlockStyleProp('constrain', sizeConstrainCheckbox.checked);
+      syncInspector();
+    });
+  }
 
   // Lock / Unlock
   const lockBtn   = document.getElementById('insp-lock-btn');
