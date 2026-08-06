@@ -135,6 +135,125 @@ function applyDragSnap(px, py) {
   return { x, y, zoneId };
 }
 
+// ── Equal-distance ("Keynote smart guide") snapping ──────────────────────
+// Separate from the stage-center/zone snap above: this measures the dragged
+// block against the *other* blocks on the slide, and when it settles into
+// the spot that makes its gap to the nearest block above equal its gap to
+// the nearest block below (or left/right), it snaps into that exact spot
+// and lights up a little gauge in each of the two now-equal gaps — the same
+// visual Keynote/PowerPoint use to say "this is centered between those two."
+const EQUAL_DIST_SNAP_THRESHOLD = 4; // px of slack before the equal-gap snap engages
+
+// Every block on the slide except the one(s) being dragged, as stage-relative
+// pixel rects — the same coordinate space `nl`/`nt` are computed in during a
+// drag, so the result can be compared/snapped against directly.
+function collectOtherBlockRects(excludeEls, stageRect) {
+  const exclude = Array.isArray(excludeEls) ? excludeEls : [excludeEls];
+  return [...canvasEl.querySelectorAll('.canvas-blocks-layer .canvas-text-block')]
+    .filter(el => !exclude.includes(el))
+    .map(el => {
+      const r = el.getBoundingClientRect();
+      return {
+        left: r.left - stageRect.left, top: r.top - stageRect.top,
+        right: r.right - stageRect.left, bottom: r.bottom - stageRect.top
+      };
+    });
+}
+
+// Finds the nearest other block strictly above/below/left/right of `rect`,
+// requiring overlap on the perpendicular axis so the relationship reads as
+// "stacked" (above/below) or "in-line" (left/right) rather than a random
+// diagonal neighbor that just happens to be the closest point.
+function findAdjacentBlocks(rect, others) {
+  let above = null, below = null, left = null, right = null;
+  others.forEach(o => {
+    const overlapsX = o.left < rect.right && o.right > rect.left;
+    const overlapsY = o.top < rect.bottom && o.bottom > rect.top;
+    if (overlapsX) {
+      if (o.bottom <= rect.top && (!above || o.bottom > above.bottom)) above = o;
+      if (o.top >= rect.bottom && (!below || o.top < below.top)) below = o;
+    }
+    if (overlapsY) {
+      if (o.right <= rect.left && (!left || o.right > left.right)) left = o;
+      if (o.left >= rect.right && (!right || o.left < right.left)) right = o;
+    }
+  });
+  return { above, below, left, right };
+}
+
+// Given the dragged block's current stage-relative rect and the other
+// blocks' rects, checks whether it's within a few px of sitting exactly
+// centered between its nearest above/below neighbor (vertically) and/or its
+// nearest left/right neighbor (horizontally) — independently per axis, same
+// as the stage-center guide. Only fires when *both* opposite neighbors
+// exist; a single neighbor has nothing to be "equal" to.
+function findEqualDistanceSnap(rect, others) {
+  const { above, below, left, right } = findAdjacentBlocks(rect, others);
+  const result = { top: rect.top, left: rect.left, showV: false, showH: false, vGap: null, hGap: null };
+
+  if (above && below) {
+    const targetTop = above.bottom + (below.top - above.bottom - rect.height) / 2;
+    if (Math.abs(rect.top - targetTop) < EQUAL_DIST_SNAP_THRESHOLD) {
+      result.top = targetTop;
+      result.showV = true;
+      const ol = Math.max(rect.left, above.left, below.left);
+      const or_ = Math.min(rect.right, above.right, below.right);
+      const x = or_ > ol ? (ol + or_) / 2 : (rect.left + rect.right) / 2;
+      result.vGap = { aboveBottom: above.bottom, boxTop: targetTop, boxBottom: targetTop + rect.height, belowTop: below.top, x };
+    }
+  }
+  if (left && right) {
+    const targetLeft = left.right + (right.left - left.right - rect.width) / 2;
+    if (Math.abs(rect.left - targetLeft) < EQUAL_DIST_SNAP_THRESHOLD) {
+      result.left = targetLeft;
+      result.showH = true;
+      const ot = Math.max(rect.top, left.top, right.top);
+      const ob = Math.min(rect.bottom, left.bottom, right.bottom);
+      const y = ob > ot ? (ot + ob) / 2 : (rect.top + rect.bottom) / 2;
+      result.hGap = { leftRight: left.right, boxLeft: targetLeft, boxRight: targetLeft + rect.width, rightLeft: right.left, y };
+    }
+  }
+  return result;
+}
+
+// Shows/positions (or hides) the four gauge elements per the result of
+// findEqualDistanceSnap — one pair spans the top+bottom gaps (vertical
+// centering), the other spans the left+right gaps (horizontal centering).
+function updateEqualDistanceGauges(eq) {
+  const top    = canvasEl.querySelector('.canvas-eq-gauge-top');
+  const bottom = canvasEl.querySelector('.canvas-eq-gauge-bottom');
+  const left   = canvasEl.querySelector('.canvas-eq-gauge-left');
+  const right  = canvasEl.querySelector('.canvas-eq-gauge-right');
+
+  if (top && bottom) {
+    top.hidden = bottom.hidden = !eq.showV;
+    if (eq.showV) {
+      top.style.left      = eq.vGap.x + 'px';
+      top.style.top       = eq.vGap.aboveBottom + 'px';
+      top.style.height    = Math.max(0, eq.vGap.boxTop - eq.vGap.aboveBottom) + 'px';
+      bottom.style.left   = eq.vGap.x + 'px';
+      bottom.style.top    = eq.vGap.boxBottom + 'px';
+      bottom.style.height = Math.max(0, eq.vGap.belowTop - eq.vGap.boxBottom) + 'px';
+    }
+  }
+  if (left && right) {
+    left.hidden = right.hidden = !eq.showH;
+    if (eq.showH) {
+      left.style.top     = eq.hGap.y + 'px';
+      left.style.left    = eq.hGap.leftRight + 'px';
+      left.style.width   = Math.max(0, eq.hGap.boxLeft - eq.hGap.leftRight) + 'px';
+      right.style.top    = eq.hGap.y + 'px';
+      right.style.left   = eq.hGap.boxRight + 'px';
+      right.style.width  = Math.max(0, eq.hGap.rightLeft - eq.hGap.boxRight) + 'px';
+    }
+  }
+}
+
+function hideEqualDistanceGauges() {
+  ['.canvas-eq-gauge-top', '.canvas-eq-gauge-bottom', '.canvas-eq-gauge-left', '.canvas-eq-gauge-right']
+    .forEach(sel => { const el = canvasEl.querySelector(sel); if (el) el.hidden = true; });
+}
+
 function parseLayoutId(top) {
   if (!top) return 'center';
   if (top.includes('{{upperthird}}'))  return 'upperthird';
@@ -1181,6 +1300,10 @@ function renderCanvas() {
           '<div class="canvas-zone-hints" hidden>' + zoneHints + '</div>' +
           '<div class="canvas-center-guide canvas-center-guide-v" hidden></div>' +
           '<div class="canvas-center-guide canvas-center-guide-h" hidden></div>' +
+          '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-top" hidden></div>' +
+          '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-bottom" hidden></div>' +
+          '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-left" hidden></div>' +
+          '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-right" hidden></div>' +
           '<div class="canvas-blocks-layer"></div>' +
           '<div class="canvas-text-editor slide-wysiwyg-editor" contenteditable="true" spellcheck="true" hidden placeholder="Type slide text here…"></div>' +
           '<div class="canvas-drag-hint">Double-click to edit · Drag to reposition</div>' +
@@ -2020,6 +2143,20 @@ function wireBlockEvents(blockEl, blockId) {
         deltaX = Math.max(-groupBounds.left, Math.min(deltaX, sr.width  - groupBounds.right));
         deltaY = Math.max(-groupBounds.top,  Math.min(deltaY, sr.height - groupBounds.bottom));
 
+        // Equal-distance guide, keyed to the same held member as the snap
+        // above: measured against every block *not* in this drag (all group
+        // members excluded, not just the held one), after the group's shared
+        // delta so the gauge tracks the held block's actual on-screen spot.
+        const heldRect = {
+          left: held.left + deltaX, top: held.top + deltaY,
+          right: held.left + deltaX + held.width, bottom: held.top + deltaY + held.height,
+          width: held.width, height: held.height
+        };
+        const otherRects = collectOtherBlockRects(memberStarts.map(m => m.el), sr);
+        const eq = findEqualDistanceSnap(heldRect, otherRects);
+        deltaX += eq.left - heldRect.left;
+        deltaY += eq.top  - heldRect.top;
+
         memberStarts.forEach(m => {
           m.el.style.left = (m.left + deltaX) + 'px';
           m.el.style.top  = (m.top  + deltaY) + 'px';
@@ -2031,6 +2168,7 @@ function wireBlockEvents(blockEl, blockId) {
         });
         if (guideV) guideV.hidden = snapped.x !== 50;
         if (guideH) guideH.hidden = snapped.y !== 50;
+        updateEqualDistanceGauges(eq);
         return;
       }
 
@@ -2050,6 +2188,22 @@ function wireBlockEvents(blockEl, blockId) {
       nl = (snapped.x / 100) * sr.width  - blockEl.offsetWidth  / 2;
       nt = (snapped.y / 100) * sr.height - blockEl.offsetHeight / 2;
 
+      // Equal-distance guide: if this puts the box within a few px of
+      // sitting exactly centered between its nearest neighbor above/below
+      // (or left/right), snap the rest of the way there and light up the
+      // gauge in each now-equal gap. Layered on top of the stage-center/zone
+      // snap above rather than a replacement for it — the two rarely
+      // disagree since equal-distance targets are almost never also a zone
+      // anchor.
+      const otherRects = collectOtherBlockRects(blockEl, sr);
+      const eq = findEqualDistanceSnap(
+        { left: nl, top: nt, right: nl + blockEl.offsetWidth, bottom: nt + blockEl.offsetHeight,
+          width: blockEl.offsetWidth, height: blockEl.offsetHeight },
+        otherRects
+      );
+      nl = eq.left;
+      nt = eq.top;
+
       blockEl.style.left = nl + 'px';
       blockEl.style.top  = nt + 'px';
       lastMouseX = e.clientX;
@@ -2061,13 +2215,18 @@ function wireBlockEvents(blockEl, blockId) {
       // too — each one only appears while that axis is actually snapped.
       if (guideV) guideV.hidden = snapped.x !== 50;
       if (guideH) guideH.hidden = snapped.y !== 50;
+      updateEqualDistanceGauges(eq);
 
       // Mirror the live position into the actual rendered preview so the
       // real text visibly follows the outline during the drag, instead of
       // only catching up once the change is saved to disk — otherwise the
       // two can noticeably disagree (outline shows the new spot, the real
       // text is still wherever it last was saved) until the next save.
-      sendCanvasCommand('moveBlock', { id: blockId, x: snapped.x, y: snapped.y });
+      // Recomputed from nl/nt rather than reusing snapped.x/y since the
+      // equal-distance snap above may have nudged the box further.
+      const finalXPct = ((nl + blockEl.offsetWidth  / 2) / sr.width)  * 100;
+      const finalYPct = ((nt + blockEl.offsetHeight / 2) / sr.height) * 100;
+      sendCanvasCommand('moveBlock', { id: blockId, x: finalXPct, y: finalYPct });
     }
 
     function onMouseUp() {
@@ -2083,6 +2242,7 @@ function wireBlockEvents(blockEl, blockId) {
       zoneHints.hidden = true;
       if (guideV) guideV.hidden = true;
       if (guideH) guideH.hidden = true;
+      hideEqualDistanceGauges();
       if (dragHint) dragHint.hidden = false;
 
       if (dragIds.length > 1) {

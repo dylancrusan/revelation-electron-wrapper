@@ -405,6 +405,47 @@
 .canvas-center-guide-v { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
 .canvas-center-guide-h { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); }
 
+/* Equal-distance ("Keynote smart guide") gauges — shown in pairs (top+bottom
+   or left+right) only while the dragged block sits exactly centered between
+   its nearest neighbor on each side, each one spanning that specific gap
+   with a dimension-line look (thin line + small end-cap ticks) so the two
+   equal gaps read as visibly matched, distinct from the blue stage-center
+   guide above. */
+.canvas-eq-gauge {
+  position: absolute;
+  background: #ffcc00;
+  box-shadow: 0 0 4px rgba(255,204,0,0.85);
+  pointer-events: none;
+  z-index: 7;
+}
+.canvas-eq-gauge[hidden] { display: none; }
+.canvas-eq-gauge-v { width: 1px; transform: translateX(-50%); }
+.canvas-eq-gauge-v::before,
+.canvas-eq-gauge-v::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 7px;
+  height: 1px;
+  background: #ffcc00;
+  transform: translateX(-50%);
+}
+.canvas-eq-gauge-v::before { top: 0; }
+.canvas-eq-gauge-v::after  { bottom: 0; }
+.canvas-eq-gauge-h { height: 1px; transform: translateY(-50%); }
+.canvas-eq-gauge-h::before,
+.canvas-eq-gauge-h::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 7px;
+  background: #ffcc00;
+  transform: translateY(-50%);
+}
+.canvas-eq-gauge-h::before { left: 0; }
+.canvas-eq-gauge-h::after  { right: 0; }
+
 /* Zone hint positions */
 .canvas-zh-center      { top: 20%; left: 15%; right: 15%; bottom: 20%; }
 .canvas-zh-upperthird  { top: 4%;    left: 33%; right: 33%; height: 34%; }
