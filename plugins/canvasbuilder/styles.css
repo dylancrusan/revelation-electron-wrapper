@@ -398,12 +398,57 @@
   font-size: 0.85em;
   opacity: 0.9;
 }
+/* The real compiler has no "verse ref" concept at all — a `_..._` line just
+   compiles to a plain <cite> inside a normal paragraph (see
+   convertUnderscoreCites in markdown-compiler.js), inheriting the same
+   alignment/size/opacity as any other line in the block. This class exists
+   here only so htmlToBody can round-trip it back to `_..._` markdown (see
+   slide-wysiwyg.js) — it must NOT carry its own right-align/dim/shrink
+   styling, or the citation visibly jumps the moment you start editing even
+   though nothing about its real rendered appearance changed. font-style is
+   the one property worth keeping explicit: it's how <cite>'s default italic
+   look gets reproduced here, since this is a <p>, not an actual <cite>. */
 .canvas-stage .canvas-text-editor .slide-wysiwyg-verse-ref {
-  margin: 2px 0;
-  font-size: 0.8em;
   font-style: italic;
-  opacity: 0.8;
-  text-align: right;
+}
+
+/* While a block is being edited, setEditing hides the *whole slide's* real
+   text in the live iframe (layouts.scss's body.canvas-builder-editing rule)
+   so it doesn't double up with this editable copy — including whatever real
+   Dark/Light Text Background pill box (layouts.scss's section[data-darkbg]/
+   [data-lightbg] p rule) was showing through before. Nothing on this editor
+   replaces it otherwise, so the box would simply vanish for the whole time
+   you're typing. Mirrors (not pixel-matches — this is a typing aid, not the
+   selection-outline alignment) the has-darkbg/has-lightbg class enterEditMode
+   sets on .canvas-text-editor itself from the slide's own textBg.
+   Deliberately keyed off the editor element's OWN class, not an ancestor
+   .canvas-stage.has-darkbg/.has-lightbg — .canvas-stage already carries an
+   unrelated (currently unused) rule under that same class name targeting the
+   read-only preview's .canvas-p/.canvas-ul divs, which are supposed to stay
+   fully transparent (see .canvas-text-inner above); toggling that class on
+   .canvas-stage would un-hide those divs on every slide with a text
+   background instead of just styling this editor. */
+.canvas-text-editor.has-darkbg p,
+.canvas-text-editor.has-darkbg .slide-wysiwyg-verse-ref,
+.canvas-text-editor.has-darkbg ul,
+.canvas-text-editor.has-darkbg ol {
+  background-color: rgba(0,0,0,0.75);
+  padding: 0.2em 0.4em;
+  border-radius: 0.1em;
+  width: fit-content;
+  margin: 0.2em auto;
+}
+.canvas-text-editor.has-lightbg p,
+.canvas-text-editor.has-lightbg .slide-wysiwyg-verse-ref,
+.canvas-text-editor.has-lightbg ul,
+.canvas-text-editor.has-lightbg ol {
+  background-color: rgba(255,255,255,0.4);
+  color: #000;
+  text-shadow: none;
+  padding: 0.2em 0.4em;
+  border-radius: 0.1em;
+  width: fit-content;
+  margin: 0.2em auto;
 }
 
 /* ── Zone hints (shown during drag) ─────────────────────────────────────── */

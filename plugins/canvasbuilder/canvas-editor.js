@@ -2512,21 +2512,54 @@ function enterEditMode(blockId) {
   const splitLineBtn    = canvasEl.querySelector('.canvas-split-line-btn');
 
   textarea.innerHTML = bodyToHtml(block.content);
+  // Mirror renderBlocksLayer's own priority order (measured > freeform >
+  // zone estimate) — without this, the moment you click to edit, the box
+  // snapped from wherever the read-only overlay had it (pixel-exact once a
+  // geometry report has arrived) down to the cruder freeform/zone-CSS
+  // fallback, a visible jump for any block whose real position isn't well
+  // approximated by that fallback.
+  const measured = measuredGeometry && measuredGeometry[block.id];
   const freeform = hasExplicitPosition(block);
-  const zoneId = freeform ? 'center' : resolveBlockZone(block, slide ? slide.top : '');
+  const zoneId = (freeform || measured) ? 'center' : resolveBlockZone(block, slide ? slide.top : '');
   LAYOUT_ZONES.forEach(z => textarea.classList.remove('canvas-zone-' + z.id));
   textarea.classList.add('canvas-zone-' + zoneId);
-  if (freeform) {
+  if (measured) {
+    textarea.style.top = designToStagePositionPct(measured.centerY) + '%';
+    textarea.style.left = designToStagePositionPct(measured.centerX) + '%';
+    textarea.style.transform = 'translate(-50%, -50%)';
+    // Real measured width too, not just position — without this the editor
+    // falls back to the zone class's own max-width and can wrap text
+    // differently than the read-only overlay it's replacing.
+    textarea.style.width = designToStageSizePct(measured.width) + '%';
+    textarea.style.maxWidth = 'none';
+  } else if (freeform) {
     const pos = resolveBlockPosition(block, slide ? slide.top : '');
     textarea.style.top = pos.y + '%';
     textarea.style.left = pos.x + '%';
     textarea.style.transform = 'translate(-50%, -50%)';
+    textarea.style.width = '';
+    textarea.style.maxWidth = '';
   } else {
     textarea.style.top = '';
     textarea.style.left = '';
     textarea.style.transform = '';
+    textarea.style.width = '';
+    textarea.style.maxWidth = '';
   }
   textarea.hidden = false;
+
+  // Mirrors the real theme's data-darkbg/data-lightbg (layouts.scss) directly
+  // on the edit overlay itself — deliberately NOT on .canvas-stage: that
+  // element already carries an unrelated (currently unused) has-darkbg/
+  // has-lightbg-keyed rule for the read-only preview's own .canvas-p/.canvas-ul
+  // divs, which sets a real color on them. Reusing that same class name up on
+  // .canvas-stage would un-hide those normally-fully-transparent divs on
+  // every slide with a text background — a real regression, not hypothetical.
+  // Scoping the class to the textarea instead means it can only ever match
+  // the .canvas-text-editor rules added alongside it in styles.css.
+  const textBg = detectTextBg(slide ? slide.top : '');
+  textarea.classList.toggle('has-darkbg', textBg === 'darkbg');
+  textarea.classList.toggle('has-lightbg', textBg === 'lightbg');
 
   // Hide the whole block wrapper, not just its inner text — the textarea
   // overlay stands in for it during editing. Hiding only the inner content
@@ -2562,6 +2595,7 @@ function exitEditModeUI() {
   const splitLineBtn   = canvasEl.querySelector('.canvas-split-line-btn');
   if (textarea) {
     LAYOUT_ZONES.forEach(z => textarea.classList.remove('canvas-zone-' + z.id));
+    textarea.classList.remove('has-darkbg', 'has-lightbg');
     textarea.hidden = true;
   }
   if (changeBgBtn)   changeBgBtn.hidden   = false;
@@ -2583,6 +2617,13 @@ function commitEdit(textarea) {
   editingBlockId = null;
   exitEditModeUI();
   renderCanvas();
+  // mutateCurrentSlide already cleared measuredGeometry (the edited text may
+  // have reflowed to a different size), and unlike a position/style change,
+  // nothing else here patches the iframe or otherwise triggers its own
+  // geometry report — without this, the block's selection outline stays on
+  // the cruder estimate until an unrelated change or slide navigation
+  // happens to trigger a fresh measurement.
+  sendCanvasCommand('requestGeometry');
 }
 
 // Move the line/paragraph the cursor is currently in out of the block being
@@ -2647,6 +2688,12 @@ function splitLineIntoNewBlock() {
   selectedBlockIds = [newId];
   mutateCurrentSlide('Split line into new text block', () => ({ body: newBody }));
   renderCanvas();
+  // Same gap as commitEdit: the source block just lost a line (and, if it
+  // has no canvas_block marker of its own, isn't covered by renderCanvas's
+  // resyncPreviewBlocks either, since that only resends style for *explicit*
+  // blocks) — nothing else here would otherwise trigger a fresh measurement
+  // of its new, smaller size.
+  sendCanvasCommand('requestGeometry');
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
 }
 
