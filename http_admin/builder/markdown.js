@@ -131,7 +131,15 @@ function isTopMatterLine(trimmed) {
     '{{animate',
     '{{transition',
     '{{autoslide',
-    '{{}}'
+    '{{}}',
+    // Inline command-form equivalents of the macro-call forms above
+    // (see MARKDOWN_REFERENCE.md 5.3 vs 5.4) — same directives, just
+    // written as :xxx: instead of {{xxx}}.
+    ':bgtint:',
+    ':audio:',
+    ':animate:',
+    ':transition:',
+    ':autoslide:'
   ];
   return prefixes.some((prefix) => trimmed.startsWith(prefix));
 }
