@@ -175,7 +175,15 @@ function bodyToHtml(markdown) {
 
     if (!trimmed) {
       flushAll();
-      blocks.push('<p><br></p>');
+      // Only exists so htmlToBody can reconstruct the blank line that
+      // separates markdown paragraphs (e.g. the one between a quote and its
+      // _citation_ — without it they'd collapse into a single paragraph on
+      // save, changing how the real compiler renders the citation). It has
+      // no visible counterpart in the compiled slide, so it's tagged with
+      // its own class purely so styles.css can zero it out visually —
+      // otherwise it inherits the same p { ...has-darkbg pill... } styling
+      // as real content and shows up as an empty dark box around the caret.
+      blocks.push('<p class="slide-wysiwyg-blank-line"><br></p>');
       continue;
     }
 

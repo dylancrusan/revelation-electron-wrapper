@@ -350,7 +350,14 @@
   line-height: 1.5;
   border: 2px dashed rgba(78,106,255,0.75);
   border-radius: 6px;
-  padding: 8px 12px;
+  /* Matches .canvas-text-block's own padding (both % of the same containing
+     .canvas-stage width), which itself mirrors the real .revelation-block's
+     padding: 1.5% 2.5% in revelation/css/source/custom/layouts.scss. The
+     previous fixed 8px/12px shrank the box the instant you started editing
+     — a shorter padded box, still centered on the same measured point via
+     translate(-50%,-50%), visibly shifts its text up/down relative to the
+     read-only overlay it replaced. */
+  padding: 1.5% 2.5%;
   z-index: 10;
   box-sizing: border-box;
   overflow-y: auto;
@@ -387,6 +394,20 @@
 .canvas-stage .canvas-text-editor h5 { font-size: 0.9em; }
 .canvas-stage .canvas-text-editor h6 { font-size: 0.8em; }
 .canvas-stage .canvas-text-editor p  { margin: 2px 0; font-size: 0.85em; }
+/* bodyToHtml (slide-wysiwyg.js) turns every blank line between markdown
+   paragraphs into its own <p class="slide-wysiwyg-blank-line"><br></p> so
+   htmlToBody can reconstruct that blank line on save — it has no visible
+   counterpart in the compiled slide. Without this override it inherits the
+   plain p rule's margin/font-size above (and, worse, the has-darkbg/
+   has-lightbg pill rules below, since those match on the bare `p` element
+   too) and shows up as a floating empty dark box around the caret. */
+.canvas-stage .canvas-text-editor .slide-wysiwyg-blank-line {
+  margin: 0;
+  padding: 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .canvas-stage .canvas-text-editor ul,
 .canvas-stage .canvas-text-editor ol { margin: 4px 0; padding-left: 22px; font-size: 0.85em; }
 .canvas-stage .canvas-text-editor li { margin: 2px 0; }
@@ -398,18 +419,24 @@
   font-size: 0.85em;
   opacity: 0.9;
 }
-/* The real compiler has no "verse ref" concept at all — a `_..._` line just
-   compiles to a plain <cite> inside a normal paragraph (see
-   convertUnderscoreCites in markdown-compiler.js), inheriting the same
-   alignment/size/opacity as any other line in the block. This class exists
-   here only so htmlToBody can round-trip it back to `_..._` markdown (see
-   slide-wysiwyg.js) — it must NOT carry its own right-align/dim/shrink
-   styling, or the citation visibly jumps the moment you start editing even
-   though nothing about its real rendered appearance changed. font-style is
-   the one property worth keeping explicit: it's how <cite>'s default italic
-   look gets reproduced here, since this is a <p>, not an actual <cite>. */
+/* A `_..._` line compiles to <cite> inside its own paragraph (see
+   convertUnderscoreCites in markdown-compiler.js) — and that <cite> is NOT
+   plain inherited text. revelation/css/source/custom/layouts.scss has real,
+   global cite:not(.attrib) styling: font-size 0.7em, italic, opacity 0.55.
+   Because the verse-ref regex only ever matches a whole line on its own, the
+   compiled <cite> is always the sole child of its paragraph, so it's always
+   both :first-child and :last-child there — and since cite:last-child comes
+   after cite:first-child in that stylesheet, its text-align:right wins the
+   cascade (both rules' distinct margin-top/margin-bottom still apply).
+   This class exists so htmlToBody can round-trip it back to `_..._`
+   markdown (see slide-wysiwyg.js); it reproduces that computed result
+   directly since this is a flattened <p>, not a real nested <cite>. */
 .canvas-stage .canvas-text-editor .slide-wysiwyg-verse-ref {
   font-style: italic;
+  font-size: 0.7em;
+  opacity: 0.55;
+  text-align: right;
+  margin: 0.3em 0;
 }
 
 /* While a block is being edited, setEditing hides the *whole slide's* real
@@ -428,7 +455,7 @@
    fully transparent (see .canvas-text-inner above); toggling that class on
    .canvas-stage would un-hide those divs on every slide with a text
    background instead of just styling this editor. */
-.canvas-text-editor.has-darkbg p,
+.canvas-text-editor.has-darkbg p:not(.slide-wysiwyg-blank-line),
 .canvas-text-editor.has-darkbg .slide-wysiwyg-verse-ref,
 .canvas-text-editor.has-darkbg ul,
 .canvas-text-editor.has-darkbg ol {
@@ -438,7 +465,20 @@
   width: fit-content;
   margin: 0.2em auto;
 }
-.canvas-text-editor.has-lightbg p,
+/* In the real render, a verse-ref's dimming (cite:not(.attrib)'s
+   opacity: 0.55) lands on the <cite> alone, nested INSIDE its own pill <p>
+   (section[data-darkbg]/[data-lightbg] p) — so the pill's background stays
+   fully opaque and only the text inside it looks faded. This flattened,
+   single-element .slide-wysiwyg-verse-ref plays both roles at once, so the
+   plain opacity: 0.55 set on it above would fade the pill along with the
+   text, making the whole thing look like it vanished rather than just its
+   text dimming. Cancel that and dim via color's own alpha channel instead,
+   which only affects the glyphs, not the box behind them. */
+.canvas-text-editor.has-darkbg .slide-wysiwyg-verse-ref {
+  opacity: 1;
+  color: rgba(255,255,255,0.55);
+}
+.canvas-text-editor.has-lightbg p:not(.slide-wysiwyg-blank-line),
 .canvas-text-editor.has-lightbg .slide-wysiwyg-verse-ref,
 .canvas-text-editor.has-lightbg ul,
 .canvas-text-editor.has-lightbg ol {
@@ -449,6 +489,10 @@
   border-radius: 0.1em;
   width: fit-content;
   margin: 0.2em auto;
+}
+.canvas-text-editor.has-lightbg .slide-wysiwyg-verse-ref {
+  opacity: 1;
+  color: rgba(0,0,0,0.55);
 }
 
 /* ── Zone hints (shown during drag) ─────────────────────────────────────── */
