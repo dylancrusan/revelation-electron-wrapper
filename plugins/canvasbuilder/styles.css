@@ -122,11 +122,38 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  box-sizing: border-box;
+  /* Mirrors .reveal .revelation-block's own inset in
+     revelation/css/source/custom/layouts.scss — without this the overlay's
+     box (used for its box-fill/box-border preview and for sizing the
+     selection outline/handles below) is smaller than the real rendered
+     block, so a filled box looks like it needs resizing and the handles
+     land inside the visible fill instead of on its edge.
+     % of the containing block's width (like this codebase's other
+     position/size values — x/y, width/height, zone offsets — always are),
+     not em: em is relative to *this element's own* font-size, which for a
+     heading-sized block is a small inherited base far below the heading's
+     own much-larger rendered size, and — worse — isn't calibrated the same
+     way in the canvas-stage's own font-size (tuned for matching heading
+     *wrap width*, see updateCanvasScale) as it is on the real renderer's
+     .revelation-block, so the two would drift apart for any block whose
+     content isn't plain body text. % of stage width is the one unit both
+     sides already agree on pixel-for-pixel. */
+  padding: 1.5% 2.5%;
 }
 .canvas-text-block.is-dragging { opacity: 0.4; cursor: grabbing; }
 .canvas-text-block.is-selected {
   outline: 2px solid rgba(78,106,255,0.85);
-  outline-offset: 3px;
+  /* -1px, half the outline's own 2px width: CSS draws an outline starting
+     AT the offset position and growing outward by outline-width, so an
+     offset of 0 puts its visual centerline 1px outward from the block's
+     true edge — not on it. A resize handle's center sits exactly on that
+     true edge (0), see .canvas-resize-nw etc. below (each an 8px square
+     centered on its own corner) — so the outline needs pulling in by half
+     its own width for the two centerlines to actually coincide,
+     Keynote-style (selection border passing through the middle of each
+     handle, not just near it). */
+  outline-offset: -1px;
   border-radius: 4px;
 }
 .canvas-text-block.is-locked { cursor: default; }
@@ -198,7 +225,7 @@
 .canvas-group-bbox {
   position: absolute;
   outline: 2px solid rgba(78,106,255,0.85);
-  outline-offset: 3px;
+  outline-offset: -1px; /* same reasoning as .canvas-text-block.is-selected above */
   border-radius: 4px;
   pointer-events: none;
   z-index: 5;
@@ -219,18 +246,35 @@
    no wrapping mismatch in the underlying font size at all. Expressing this
    relative to the base font-size instead keeps the max-width/font-size
    ratio — and so the wrapping decision — consistent with the real theme's
-   own (960px design, 90%/80%/48% max-widths, ~42px base font-size) at any
-   panel size. Values: 90%/80%/48% of 960px, divided by that ~42px base.
-   Recalibrate these if the real theme's own numbers change. */
-.canvas-zone-center     { top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 20.57em; text-align: center; align-items: center; }
-.canvas-zone-upperthird { top: 6%; left: 50%; transform: translateX(-50%); max-width: 18.29em; text-align: center; align-items: center; }
-.canvas-zone-lowerthird { bottom: 6%; left: 50%; transform: translateX(-50%); max-width: 18.29em; text-align: center; align-items: center; }
-.canvas-zone-shiftright { top: 50%; right: 4%; max-width: 10.97em; transform: translateY(-50%); }
-.canvas-zone-shiftleft  { top: 50%; left: 4%; max-width: 10.97em; transform: translateY(-50%); }
-.canvas-zone-topleft    { top: 6%; left: 4%; max-width: 10.97em; }
-.canvas-zone-topright   { top: 6%; right: 4%; max-width: 10.97em; text-align: right; align-items: flex-end; }
-.canvas-zone-bottomleft  { bottom: 6%; left: 4%; max-width: 10.97em; }
-.canvas-zone-bottomright { bottom: 6%; right: 4%; max-width: 10.97em; text-align: right; align-items: flex-end; }
+   own (960px design, 95%/85%/53% max-widths, ~42px base font-size) at any
+   panel size. Values: 95%/85%/53% of 960px, divided by that ~42px base —
+   see revelation/css/source/custom/layouts.scss's own [data-zone] rules for
+   where the +5% over the "original" 90%/80%/48% comes from (compensating
+   .revelation-block's own horizontal padding so it can't change wrapping).
+   Only matters here as this block's *fallback* estimate before its real
+   measured geometry arrives (see measuredGeometry in canvas-editor.js) —
+   still worth keeping accurate, to keep that initial estimate close and the
+   snap-to-exact small. Recalibrate if the real theme's own numbers change. */
+/* top/bottom/left/right below are stage-relative (% of .canvas-stage, the
+   real iframe's *full* un-inset viewport — see designToStagePositionPct's
+   own comment in canvas-editor.js), converted from the real renderer's
+   design-relative 6%/4%/50% (revelation/css/source/custom/layouts.scss's
+   own [data-zone] rules) via reveal.js's own margin:0.04: 6 -> 2+6*0.96 =
+   7.76, 4 -> 2+4*0.96 = 5.84, 50 -> 50 (unchanged — the design area is
+   centered within the stage, so they share the same center exactly).
+   Matters for any block that's never been touched since load — measured
+   geometry (once it arrives) overrides this anyway, but a .revelation-block
+   wrapper (and so a geometry report) only exists once a block has an
+   explicit marker, so a pure zone-only block can rely on this indefinitely. */
+.canvas-zone-center     { top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 21.71em; text-align: center; align-items: center; }
+.canvas-zone-upperthird { top: 7.76%; left: 50%; transform: translateX(-50%); max-width: 19.43em; text-align: center; align-items: center; }
+.canvas-zone-lowerthird { bottom: 7.76%; left: 50%; transform: translateX(-50%); max-width: 19.43em; text-align: center; align-items: center; }
+.canvas-zone-shiftright { top: 50%; right: 5.84%; max-width: 12.11em; transform: translateY(-50%); }
+.canvas-zone-shiftleft  { top: 50%; left: 5.84%; max-width: 12.11em; transform: translateY(-50%); }
+.canvas-zone-topleft    { top: 7.76%; left: 5.84%; max-width: 12.11em; }
+.canvas-zone-topright   { top: 7.76%; right: 5.84%; max-width: 12.11em; text-align: right; align-items: flex-end; }
+.canvas-zone-bottomleft  { bottom: 7.76%; left: 5.84%; max-width: 12.11em; }
+.canvas-zone-bottomright { bottom: 7.76%; right: 5.84%; max-width: 12.11em; text-align: right; align-items: flex-end; }
 
 /* Text inner — transparent so the iframe preview shows through cleanly */
 .canvas-text-inner {

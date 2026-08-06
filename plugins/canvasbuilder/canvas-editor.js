@@ -69,12 +69,57 @@ function navigateCanvas() {
   sendCanvasCommand('slide', { h: sel.h, v: sel.v });
 }
 
+// Applies real, actually-rendered block geometry reported by the live
+// preview iframe (postBlockGeometry in revelation/js/presentations.js), so
+// renderBlocksLayer can size/position the overlay pixel-exact instead of
+// estimating. Re-renders only the block layer itself, never the full
+// renderCanvas() — that would re-run resyncPreviewBlocks, which resends
+// blockStyle for every explicit block, which the iframe answers with
+// another 'geometry' report on its way out — an infinite ping-pong.
+function applyMeasuredGeometry(payload) {
+  const p = payload || {};
+  const sel = _host.getSelection();
+  // A report for a slide we've since navigated away from — discard rather
+  // than misapplying it to whatever's now selected (block ids can collide
+  // across slides).
+  if (p.h !== sel.h || p.v !== sel.v) return;
+  measuredGeometry = {};
+  (p.blocks || []).forEach(b => { measuredGeometry[b.id] = b; });
+  // Snapshot of the exact body content this measurement reflects — checked
+  // in renderCanvas below on every render, regardless of what caused it.
+  // mutateCurrentSlide's own clear (see there) only catches edits that go
+  // through it; undo/redo goes through the host's own undo-manager and
+  // never calls it (or setBlockPosition/setBlockStyleProp/etc.) at all, so
+  // it's a real gap that clear alone can't close. Comparing actual content
+  // instead of trying to catch every mutation path individually closes it
+  // regardless of the cause.
+  measuredGeometryBody = (getCurrentSlide() || {}).body ?? null;
+  // Stored above either way — just deferring the re-render itself until the
+  // gesture's own mouseup, which renders anyway (see blockInteractionInProgress).
+  if (blockInteractionInProgress) return;
+  const slide = getCurrentSlide();
+  if (!slide || editingBlockId !== null) return;
+  renderBlocksLayer(parseBodyBlocks(slide.body), slide.top);
+}
+
 function getCurrentSlide() {
   const { h, v } = _host.getSelection();
   return _host.getDocument().stacks[h]?.[v] || null;
 }
 
 function mutateCurrentSlide(label, mutator) {
+  // Any block mutation (move/resize/rotate/style/text/reorder — every path
+  // here funnels through this one function) can change what the real
+  // renderer measures next, and the fresh report is asynchronous (a
+  // postMessage round trip to the iframe and back — see
+  // applyMeasuredGeometry/postBlockGeometry). Without clearing this now,
+  // the render this same mutation triggers below would keep using
+  // measuredGeometry from *before* the edit — stale center/size applied to
+  // a block whose real content already moved on to something else,
+  // reading as "extremely offset" until the next report lands. Clearing
+  // falls back to the always-current-with-the-model estimate for the one
+  // render in between; the real numbers snap back in moments later.
+  measuredGeometry = null;
   const { h, v } = _host.getSelection();
   const doc = _host.getDocument();
   const newStacks = doc.stacks.map((col, ch) =>
@@ -96,6 +141,30 @@ let lastRenderedSlideKey = null;
 // that same block-1 fallback.
 let selectedBlockIds = [1];
 let editingBlockId = null;
+// Real, actually-rendered per-block geometry reported by the live preview
+// iframe (see revelation/js/presentations.js's postBlockGeometry) — keyed by
+// block id, { centerX, centerY, width, height } as % of the slide. null
+// until the iframe's first report arrives (renderBlocksLayer falls back to
+// the shrink-to-fit/em-calibrated estimate until then), and cleared on every
+// slide change since a previous slide's geometry can't apply to a new one.
+let measuredGeometry = null;
+// The exact slide.body measuredGeometry above was measured against (see
+// applyMeasuredGeometry) — null whenever measuredGeometry itself is null.
+// renderCanvas compares this against the slide's *current* body on every
+// render and drops measuredGeometry the moment they differ, regardless of
+// what changed the body (mutateCurrentSlide's own clear only catches edits
+// that go through it — undo/redo doesn't, see applyMeasuredGeometry).
+let measuredGeometryBody = null;
+// True while a resize/rotate/group-resize/move gesture's own mousemove
+// listener is attached. A geometry report arriving mid-gesture still gets
+// stored (measuredGeometry above), but applyMeasuredGeometry must not
+// re-render the blocks layer while this is true — that layer rebuild would
+// replace the very element the gesture's mousemove closure is holding a
+// reference to (those listeners live on `document`, so they'd keep firing,
+// just moving a now-detached node instead of the visible one). The
+// gesture's own mouseup already triggers a full render right after clearing
+// this, which picks up whatever's newest in measuredGeometry by then.
+let blockInteractionInProgress = false;
 
 const LAYOUT_ZONES = [
   { id: 'center',      macro: null,              label: 'Center',       ax: 50, ay: 50 },
@@ -339,6 +408,36 @@ function updateCanvasScale(stageEl) {
   // alike — this divisor corrects for that.
   if (w > 0) el.style.fontSize = (w / 1920 * 100 / 1.128) + 'px';
 }
+
+// reveal.js's own `margin` config (0.04 — reveal's built-in default; nothing
+// in revelation/js/presentations.js's `new Reveal({...})` call overrides it)
+// insets the actual slide content within the real iframe's viewport by
+// margin/2 on *each* side, via a transform: scale() on `.reveal .slides`.
+// Every saved/measured block position and size (x/y/width/height, and
+// postBlockGeometry's centerX/centerY/width/height) is relative to that
+// smaller, inset design area — it's computed from .revelation-block's own
+// position inside `.reveal .slides section`, which sits inside reveal's own
+// inset, not the raw viewport. .canvas-stage, on the other hand, is sized to
+// the *full* viewport (.canvas-iframe fills it edge to edge, matching the
+// real iframe's own window.innerWidth/Height exactly) — it has no margin of
+// its own. Applying a design-relative percentage directly as a stage-
+// relative CSS percentage — which is what every block placement and every
+// drag/resize save did before this — silently shifts a block toward the
+// stage's edge by an amount that grows with distance from center (zero
+// exactly at 50%/50%, which is why every center-anchored block always
+// looked correct while anything dragged off-center didn't). These convert
+// between the two: use the *ToStage ones when applying a design-relative
+// value (a saved x/y/width/height, or a measuredGeometry report) as CSS
+// against .canvas-stage; use the *ToDesign ones when a drag/resize/
+// distribute computed a stage-relative percentage from stage.
+// getBoundingClientRect() and needs to save it as x/y/width/height instead.
+const REVEAL_DESIGN_MARGIN = 0.04;
+const REVEAL_DESIGN_SCALE = 1 - REVEAL_DESIGN_MARGIN; // 0.96 — fraction of the stage's own axis the design area spans
+const REVEAL_DESIGN_INSET_PCT = REVEAL_DESIGN_MARGIN / 2 * 100; // 2 — % of the stage's own axis reserved on *each* side
+function designToStagePositionPct(designPct) { return REVEAL_DESIGN_INSET_PCT + designPct * REVEAL_DESIGN_SCALE; }
+function stageToDesignPositionPct(stagePct) { return (stagePct - REVEAL_DESIGN_INSET_PCT) / REVEAL_DESIGN_SCALE; }
+function designToStageSizePct(designPct) { return designPct * REVEAL_DESIGN_SCALE; }
+function stageToDesignSizePct(stagePct) { return stagePct / REVEAL_DESIGN_SCALE; }
 
 // Per-block style: styling metadata for one canvas text block, stored as an
 // inline `<!-- canvas_block_N: key=val,... -->` marker line at the start of
@@ -1002,10 +1101,12 @@ function distributeBlocks(ids, axis) { // axis: 'h' | 'v'
   sorted.slice(1, -1).forEach(r => {
     const size = axis === 'h' ? r.width : r.height;
     const centerPx = cursor + gap + size / 2;
-    const pct = (centerPx / (axis === 'h' ? stageRect.width : stageRect.height)) * 100;
-    const otherPct = axis === 'h'
+    // Design-relative (see designToStagePositionPct) — this is what
+    // actually gets saved as x/y.
+    const pct = stageToDesignPositionPct((centerPx / (axis === 'h' ? stageRect.width : stageRect.height)) * 100);
+    const otherPct = stageToDesignPositionPct(axis === 'h'
       ? ((r.top + r.height / 2) / stageRect.height) * 100
-      : ((r.left + r.width / 2) / stageRect.width) * 100;
+      : ((r.left + r.width / 2) / stageRect.width) * 100);
     moves.push(axis === 'h' ? { id: r.id, x: pct, y: otherPct } : { id: r.id, x: otherPct, y: pct });
     cursor = cursor + gap + size;
   });
@@ -1274,6 +1375,12 @@ function renderCanvas() {
     editingBlockId = null;
     exitEditModeUI();
     selectedBlockIds = [1];
+    // A previous slide's measured geometry can't apply to this one (even a
+    // matching block id would be a different block) — fall back to the
+    // estimate until this slide's own report arrives via navigateCanvas()
+    // below (sends 'slide', which the iframe answers with 'slidechanged' ->
+    // postBlockGeometry).
+    measuredGeometry = null;
   }
   lastRenderedSlideKey = slideKey;
 
@@ -1340,6 +1447,17 @@ function renderCanvas() {
   const removeBtn = canvasEl.querySelector('.canvas-act-remove');
   if (removeBtn) removeBtn.hidden = !bg;
 
+  // measuredGeometry only reflects the body it was measured against —
+  // dropped here (not just at mutateCurrentSlide, which only clears it for
+  // edits that go through this plugin's own mutators) so it can't outlive
+  // a body change made some other way, e.g. undo/redo going through the
+  // host's own undo-manager directly. See measuredGeometryBody's own
+  // comment.
+  if (measuredGeometry && measuredGeometryBody !== slide.body) {
+    measuredGeometry = null;
+    measuredGeometryBody = null;
+  }
+
   // Skip rebuilding block DOM while a block is actively being edited, so we
   // don't yank the shared editor's anchor out from under an open edit session.
   if (editingBlockId === null) {
@@ -1381,6 +1499,20 @@ function resyncPreviewBlocks(blocks) {
   sendCanvasCommand('reorderBlocks', { ids: blocks.map(b => b.id) });
 }
 
+// Shared by renderBlocksLayer's freeform and measured-geometry branches —
+// both are center-anchored (translate(-50%,-50%)) with the same rotate/flip
+// on top, so a rotation only ever turns the box around its own center
+// regardless of which branch computed that center.
+function buildBlockTransform(block) {
+  let transform = 'translate(-50%, -50%)';
+  const deg = parseFloat(block.style.rotate);
+  if (Number.isFinite(deg) && deg !== 0) transform += ' rotate(' + deg + 'deg)';
+  if (block.style.flipH || block.style.flipV) {
+    transform += ' scale(' + (block.style.flipH ? -1 : 1) + ', ' + (block.style.flipV ? -1 : 1) + ')';
+  }
+  return transform;
+}
+
 function renderBlocksLayer(blocks, slideTop) {
   const layer = canvasEl.querySelector('.canvas-blocks-layer');
   if (!layer) return;
@@ -1390,27 +1522,52 @@ function renderBlocksLayer(blocks, slideTop) {
     // shape (width/text-align) and get their real position from an inline
     // top/left/transform override below — inline styles win over the
     // class's own top:50%/left:50%, so this needs no separate CSS rule.
+    // A measured block needs that same "center" shape for a different
+    // reason: it also gets an inline top override below, and a non-center
+    // zone class (e.g. lowerthird) sets *bottom*, not top — leaving both a
+    // CSS bottom and an inline top active at once would stretch the box to
+    // fill the gap between them instead of sizing to measured.height. Only
+    // "center" has no bottom/right of its own to conflict with. (The
+    // resulting text-align mismatch on a non-center measured block is
+    // invisible — this inner text is fully transparent either way, see
+    // .canvas-text-inner below.)
     const freeform = hasExplicitPosition(block);
-    const zoneId = freeform ? 'center' : resolveBlockZone(block, slideTop);
+    const measured = measuredGeometry && measuredGeometry[block.id];
+    const zoneId = (freeform || measured) ? 'center' : resolveBlockZone(block, slideTop);
     const el = document.createElement('div');
     el.className = 'canvas-text-block canvas-zone-' + zoneId;
-    if (freeform) {
-      const pos = resolveBlockPosition(block, slideTop);
-      el.style.top = pos.y + '%';
-      el.style.left = pos.x + '%';
-      let transform = 'translate(-50%, -50%)';
-      const deg = parseFloat(block.style.rotate);
-      if (Number.isFinite(deg) && deg !== 0) transform += ' rotate(' + deg + 'deg)';
-      if (block.style.flipH || block.style.flipV) {
-        transform += ' scale(' + (block.style.flipH ? -1 : 1) + ', ' + (block.style.flipV ? -1 : 1) + ')';
-      }
-      el.style.transform = transform;
+    if (measured) {
+      // Pixel-exact: real center/size straight from the live preview iframe
+      // (see applyMeasuredGeometry/postBlockGeometry in
+      // revelation/js/presentations.js) instead of the shrink-to-fit +
+      // em-calibrated-font estimate below — eliminates any drift from
+      // approximating this theme's actual fonts/line-height/kerning in a
+      // separate lookalike CSS reproduction (.canvas-h1 etc. below). Takes
+      // priority over both the freeform and zone-content-sizing branches:
+      // it supersedes whatever produced the real block's layout (zone
+      // anchor, explicit width, shrink-to-fit), since it's a direct report
+      // of the result, not a guess at the mechanism.
+      // measured.* is design-relative (the real renderer's own space —
+      // see postBlockGeometry) and .canvas-stage is stage-relative (the
+      // real iframe's full, un-inset viewport) — converted here, see
+      // designToStagePositionPct/designToStageSizePct's own comment.
+      el.style.top = designToStagePositionPct(measured.centerY) + '%';
+      el.style.left = designToStagePositionPct(measured.centerX) + '%';
+      el.style.transform = buildBlockTransform(block);
+      el.style.width = designToStageSizePct(measured.width) + '%';
+      el.style.height = designToStageSizePct(measured.height) + '%';
+      el.style.maxWidth = 'none';
+    } else if (freeform) {
+      const pos = resolveBlockPosition(block, slideTop); // design-relative, see designToStagePositionPct
+      el.style.top = designToStagePositionPct(pos.y) + '%';
+      el.style.left = designToStagePositionPct(pos.x) + '%';
+      el.style.transform = buildBlockTransform(block);
       if (hasExplicitSize(block)) {
         // max-width:none is required alongside width — the zone class's own
         // max-width cap still applies to an inline width otherwise, so a
         // wider explicit width would silently do nothing without this.
-        el.style.width = block.style.width + '%';
-        el.style.height = block.style.height + '%';
+        el.style.width = designToStageSizePct(parseFloat(block.style.width)) + '%';
+        el.style.height = designToStageSizePct(parseFloat(block.style.height)) + '%';
         el.style.maxWidth = 'none';
       }
     }
@@ -1468,6 +1625,7 @@ function wireResizeHandle(handleEl, blockId, corner) {
     const stage = canvasEl.querySelector('.canvas-stage');
     const blockEl = handleEl.parentElement;
     if (!stage || !blockEl) return;
+    blockInteractionInProgress = true;
 
     const stageRect = stage.getBoundingClientRect();
     const startRect = blockEl.getBoundingClientRect();
@@ -1554,15 +1712,17 @@ function wireResizeHandle(handleEl, blockId, corner) {
 
       // Live-sync the real preview the same way a move-drag streams
       // moveBlock every frame — otherwise the resize is invisible in the
-      // iframe until the handle is released.
-      const centerXPct = ((newLeft + newWidth  / 2) / sr.width)  * 100;
-      const centerYPct = ((newTop  + newHeight / 2) / sr.height) * 100;
+      // iframe until the handle is released. x/y/width/height land straight
+      // in the real block's own inline style (see presentations.js), which
+      // is design-relative — convert from this stage-pixel math.
+      const centerXPct = stageToDesignPositionPct(((newLeft + newWidth  / 2) / sr.width)  * 100);
+      const centerYPct = stageToDesignPositionPct(((newTop  + newHeight / 2) / sr.height) * 100);
       sendCanvasCommand('blockStyle', {
         id: blockId,
         style: Object.assign({}, baseStyle, {
           x: centerXPct.toFixed(2), y: centerYPct.toFixed(2),
-          width: ((newWidth / sr.width) * 100).toFixed(2),
-          height: ((newHeight / sr.height) * 100).toFixed(2)
+          width: stageToDesignSizePct((newWidth / sr.width) * 100).toFixed(2),
+          height: stageToDesignSizePct((newHeight / sr.height) * 100).toFixed(2)
         })
       });
     }
@@ -1570,14 +1730,17 @@ function wireResizeHandle(handleEl, blockId, corner) {
     function onMouseUp() {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      blockInteractionInProgress = false;
       if (!resizing) return; // plain click on the handle, no drag — no-op
 
+      // Design-relative (see designToStagePositionPct/designToStageSizePct)
+      // — this is what actually gets saved as x/y/width/height.
       const sr = stage.getBoundingClientRect();
       const br = blockEl.getBoundingClientRect();
-      const centerXPct = ((br.left + br.width  / 2 - sr.left) / sr.width)  * 100;
-      const centerYPct = ((br.top  + br.height / 2 - sr.top)  / sr.height) * 100;
-      const widthPct  = (br.width  / sr.width)  * 100;
-      const heightPct = (br.height / sr.height) * 100;
+      const centerXPct = stageToDesignPositionPct(((br.left + br.width  / 2 - sr.left) / sr.width)  * 100);
+      const centerYPct = stageToDesignPositionPct(((br.top  + br.height / 2 - sr.top)  / sr.height) * 100);
+      const widthPct  = stageToDesignSizePct((br.width  / sr.width)  * 100);
+      const heightPct = stageToDesignSizePct((br.height / sr.height) * 100);
 
       blockEl.style.position  = '';
       blockEl.style.left      = '';
@@ -1619,6 +1782,7 @@ function wireRotateHandle(handleEl, blockId) {
 
     const blockEl = handleEl.parentElement;
     if (!blockEl) return;
+    blockInteractionInProgress = true;
     const rect = blockEl.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -1655,6 +1819,7 @@ function wireRotateHandle(handleEl, blockId) {
     function onMouseUp() {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      blockInteractionInProgress = false;
       if (!rotating) return; // plain click on the handle, no drag — no-op
       setBlockStyleProp('rotate', String(finalDeg));
     }
@@ -1716,6 +1881,7 @@ function wireGroupResizeHandle(handleEl, ids, corner) {
     const layer = canvasEl.querySelector('.canvas-blocks-layer');
     const bboxEl = handleEl.parentElement;
     if (!stage || !layer || !bboxEl) return;
+    blockInteractionInProgress = true;
     const stageRect = stage.getBoundingClientRect();
 
     const members = ids.map(id => {
@@ -1779,14 +1945,17 @@ function wireGroupResizeHandle(handleEl, ids, corner) {
         m.el.style.maxWidth  = 'none';
         m.el.style.transform = 'none';
 
+        // x/y/width/height land straight in the real block's own inline
+        // style (see presentations.js), which is design-relative — convert
+        // from this stage-pixel math before sending.
         const baseStyle = getStyleForBlockId(m.id);
         sendCanvasCommand('blockStyle', {
           id: m.id,
           style: Object.assign({}, baseStyle, {
-            x: (((ml + mw / 2) / sr.width)  * 100).toFixed(2),
-            y: (((mt + mh / 2) / sr.height) * 100).toFixed(2),
-            width:  ((mw / sr.width)  * 100).toFixed(2),
-            height: ((mh / sr.height) * 100).toFixed(2)
+            x: stageToDesignPositionPct(((ml + mw / 2) / sr.width)  * 100).toFixed(2),
+            y: stageToDesignPositionPct(((mt + mh / 2) / sr.height) * 100).toFixed(2),
+            width:  stageToDesignSizePct((mw / sr.width)  * 100).toFixed(2),
+            height: stageToDesignSizePct((mh / sr.height) * 100).toFixed(2)
           })
         });
       });
@@ -1795,17 +1964,20 @@ function wireGroupResizeHandle(handleEl, ids, corner) {
     function onMouseUp() {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      blockInteractionInProgress = false;
       if (!resizing) return; // plain click on the handle, no drag — no-op
 
+      // Design-relative (see designToStagePositionPct/designToStageSizePct)
+      // — this is what actually gets saved as x/y/width/height.
       const sr = stage.getBoundingClientRect();
       const entries = members.map(m => {
         const r = m.el.getBoundingClientRect();
         const entry = {
           id: m.id,
-          x: ((r.left + r.width  / 2 - sr.left) / sr.width)  * 100,
-          y: ((r.top  + r.height / 2 - sr.top)  / sr.height) * 100,
-          width:  (r.width  / sr.width)  * 100,
-          height: (r.height / sr.height) * 100
+          x: stageToDesignPositionPct(((r.left + r.width  / 2 - sr.left) / sr.width)  * 100),
+          y: stageToDesignPositionPct(((r.top  + r.height / 2 - sr.top)  / sr.height) * 100),
+          width:  stageToDesignSizePct((r.width  / sr.width)  * 100),
+          height: stageToDesignSizePct((r.height / sr.height) * 100)
         };
         m.el.style.position  = '';
         m.el.style.left      = '';
@@ -2074,6 +2246,7 @@ function wireBlockEvents(blockEl, blockId) {
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
     dragging = false;
+    blockInteractionInProgress = true;
 
     // Group-drag snapshot: every dragged member's element + starting
     // stage-relative rect, plus the whole set's combined bounding box — used
@@ -2129,11 +2302,16 @@ function wireBlockEvents(blockEl, blockId) {
         const held = memberStarts.find(m => m.id === blockId);
         let nl = e.clientX - sr.left - offsetX;
         let nt = e.clientY - sr.top  - offsetY;
-        const heldCenterXPct = ((nl + held.width  / 2) / sr.width)  * 100;
-        const heldCenterYPct = ((nt + held.height / 2) / sr.height) * 100;
+        // applyDragSnap compares against LAYOUT_ZONES' ax/ay, which are
+        // design-relative (see designToStagePositionPct's own comment) —
+        // convert the stage-relative live position in, then its snapped
+        // result back out, so the comparison and this pixel math agree on
+        // units.
+        const heldCenterXPct = stageToDesignPositionPct(((nl + held.width  / 2) / sr.width)  * 100);
+        const heldCenterYPct = stageToDesignPositionPct(((nt + held.height / 2) / sr.height) * 100);
         const snapped = applyDragSnap(heldCenterXPct, heldCenterYPct);
-        const snappedLeft = (snapped.x / 100) * sr.width  - held.width  / 2;
-        const snappedTop  = (snapped.y / 100) * sr.height - held.height / 2;
+        const snappedLeft = (designToStagePositionPct(snapped.x) / 100) * sr.width  - held.width  / 2;
+        const snappedTop  = (designToStagePositionPct(snapped.y) / 100) * sr.height - held.height / 2;
         let deltaX = snappedLeft - held.left;
         let deltaY = snappedTop  - held.top;
 
@@ -2160,10 +2338,13 @@ function wireBlockEvents(blockEl, blockId) {
         memberStarts.forEach(m => {
           m.el.style.left = (m.left + deltaX) + 'px';
           m.el.style.top  = (m.top  + deltaY) + 'px';
+          // moveBlock's x/y land straight in the real block's own top/left
+          // (see presentations.js), which is design-relative — convert
+          // from this stage-pixel math before sending.
           sendCanvasCommand('moveBlock', {
             id: m.id,
-            x: ((m.left + deltaX + m.width  / 2) / sr.width)  * 100,
-            y: ((m.top  + deltaY + m.height / 2) / sr.height) * 100
+            x: stageToDesignPositionPct(((m.left + deltaX + m.width  / 2) / sr.width)  * 100),
+            y: stageToDesignPositionPct(((m.top  + deltaY + m.height / 2) / sr.height) * 100)
           });
         });
         if (guideV) guideV.hidden = snapped.x !== 50;
@@ -2182,11 +2363,14 @@ function wireBlockEvents(blockEl, blockId) {
       // top-left coordinates this drag loop positions the box with — so the
       // outline visibly sticks in place once it crosses a snap threshold,
       // instead of only snapping invisibly at drop time.
-      const centerXPct = ((nl + blockEl.offsetWidth  / 2) / sr.width)  * 100;
-      const centerYPct = ((nt + blockEl.offsetHeight / 2) / sr.height) * 100;
+      // applyDragSnap compares against LAYOUT_ZONES' design-relative ax/ay
+      // (see designToStagePositionPct's own comment) — convert in and its
+      // result back out so the comparison and this pixel math agree on units.
+      const centerXPct = stageToDesignPositionPct(((nl + blockEl.offsetWidth  / 2) / sr.width)  * 100);
+      const centerYPct = stageToDesignPositionPct(((nt + blockEl.offsetHeight / 2) / sr.height) * 100);
       const snapped = applyDragSnap(centerXPct, centerYPct);
-      nl = (snapped.x / 100) * sr.width  - blockEl.offsetWidth  / 2;
-      nt = (snapped.y / 100) * sr.height - blockEl.offsetHeight / 2;
+      nl = (designToStagePositionPct(snapped.x) / 100) * sr.width  - blockEl.offsetWidth  / 2;
+      nt = (designToStagePositionPct(snapped.y) / 100) * sr.height - blockEl.offsetHeight / 2;
 
       // Equal-distance guide: if this puts the box within a few px of
       // sitting exactly centered between its nearest neighbor above/below
@@ -2224,14 +2408,17 @@ function wireBlockEvents(blockEl, blockId) {
       // text is still wherever it last was saved) until the next save.
       // Recomputed from nl/nt rather than reusing snapped.x/y since the
       // equal-distance snap above may have nudged the box further.
-      const finalXPct = ((nl + blockEl.offsetWidth  / 2) / sr.width)  * 100;
-      const finalYPct = ((nt + blockEl.offsetHeight / 2) / sr.height) * 100;
+      // moveBlock's x/y land straight in the real block's own top/left (see
+      // presentations.js), which is design-relative — convert before sending.
+      const finalXPct = stageToDesignPositionPct(((nl + blockEl.offsetWidth  / 2) / sr.width)  * 100);
+      const finalYPct = stageToDesignPositionPct(((nt + blockEl.offsetHeight / 2) / sr.height) * 100);
       sendCanvasCommand('moveBlock', { id: blockId, x: finalXPct, y: finalYPct });
     }
 
     function onMouseUp() {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      blockInteractionInProgress = false;
 
       if (!dragging) {
         // Plain click, no drag: selection was already resolved at mousedown.
@@ -2249,8 +2436,11 @@ function wireBlockEvents(blockEl, blockId) {
         const sr = stage.getBoundingClientRect();
         const moves = memberStarts.map(m => {
           const r = m.el.getBoundingClientRect();
-          let px = ((r.left + r.width  / 2 - sr.left) / sr.width)  * 100;
-          let py = ((r.top  + r.height / 2 - sr.top)  / sr.height) * 100;
+          // Design-relative (see designToStagePositionPct) — this is what
+          // actually gets saved as x/y, so convert before the clamp below,
+          // not after, or the 2/98 bounds wouldn't mean what they say.
+          let px = stageToDesignPositionPct(((r.left + r.width  / 2 - sr.left) / sr.width)  * 100);
+          let py = stageToDesignPositionPct(((r.top  + r.height / 2 - sr.top)  / sr.height) * 100);
           px = Math.max(2, Math.min(98, px));
           py = Math.max(2, Math.min(98, py));
           m.el.classList.remove('is-dragging');
@@ -2276,8 +2466,12 @@ function wireBlockEvents(blockEl, blockId) {
       // it was originally grabbed).
       const sr = stage.getBoundingClientRect();
       const br = blockEl.getBoundingClientRect();
-      let px = ((br.left + br.width  / 2 - sr.left) / sr.width)  * 100;
-      let py = ((br.top  + br.height / 2 - sr.top)  / sr.height) * 100;
+      // Design-relative (see designToStagePositionPct) — this is what
+      // actually gets saved as x/y (and what applyDragSnap below compares
+      // against LAYOUT_ZONES' own design-relative ax/ay), so convert before
+      // the clamp, not after, or the 2/98 bounds wouldn't mean what they say.
+      let px = stageToDesignPositionPct(((br.left + br.width  / 2 - sr.left) / sr.width)  * 100);
+      let py = stageToDesignPositionPct(((br.top  + br.height / 2 - sr.top)  / sr.height) * 100);
       px = Math.max(2, Math.min(98, px));
       py = Math.max(2, Math.min(98, py));
 
@@ -2470,6 +2664,7 @@ function initCanvasEditor(el, opts) {
     if (data.bridge !== CANVAS_BRIDGE || data.type !== 'preview-event') return;
     if (data.token !== generateCanvasBridgeToken()) return;
     if (data.event === 'ready' || data.event === 'slidechanged') navigateCanvas();
+    if (data.event === 'geometry') applyMeasuredGeometry(data.payload);
   });
 }
 
