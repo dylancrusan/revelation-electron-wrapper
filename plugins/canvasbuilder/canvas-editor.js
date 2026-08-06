@@ -86,9 +86,14 @@ function mutateCurrentSlide(label, mutator) {
 let canvasEl = null;
 let canvasActive = false;
 let lastRenderedSlideKey = null;
-// Never empty while a slide exists — there is no "nothing selected" state.
-// The last element is the "primary" block (what every single-block reader
-// like getBlockStyle/getResolvedBlockPosition operates on).
+// Can be empty — deselectAll() clears it (e.g. clicking empty canvas
+// background) and it stays empty until something is selected again. Every
+// single-block reader (getBlockStyle/getResolvedBlockPosition/etc.) still
+// operates on the last element as the "primary" block, falling back to
+// block 1 via findBlock's own fallback when nothing is selected; every
+// *mutator* that depends on a selection guards against the empty case
+// instead, so an empty selection is inert rather than silently acting on
+// that same block-1 fallback.
 let selectedBlockIds = [1];
 let editingBlockId = null;
 
@@ -465,6 +470,11 @@ function getBlockStyle() {
 function setBlockStyleProp(key, value) {
   const slide = getCurrentSlide();
   if (!slide) return;
+  // Every branch below acts on the selection except textBg (a slide-wide
+  // property, not per-block) — with nothing selected there is no block to
+  // apply key/value to, so bail rather than silently falling back to
+  // whatever findBlock's own block-1 fallback would resolve to.
+  if (key !== 'textBg' && !selectedBlockIds.length) return;
 
   // blockType and textBg affect the slide body/top differently
   if (key === 'blockType') {
@@ -504,11 +514,20 @@ function setBlockStyleProp(key, value) {
     return;
   }
 
+  // Every generic Style/Text control funnels through this one path, so a
+  // multi-selection applies the change to every selected block at once —
+  // blockType/textBg and rotate/flip/size (handled in their own branches
+  // above) stay single-target; batch-changing heading levels across
+  // dissimilar blocks or rotating/resizing a whole selection as one unit
+  // isn't what this path is for.
   const blocks = parseBodyBlocks(slide.body);
-  const block = findBlock(blocks, getSelectedBlockId());
-  block.style = Object.assign({}, block.style, { [key]: value });
-  block.explicit = true;
-  preserveBlock1Zone(block, slide.top);
+  const ids = getSelectedBlockIds();
+  ids.forEach(targetId => {
+    const block = findBlock(blocks, targetId);
+    block.style = Object.assign({}, block.style, { [key]: value });
+    block.explicit = true;
+    preserveBlock1Zone(block, slide.top);
+  });
   const newBody = serializeBodyBlocks(blocks);
   mutateCurrentSlide('Update block style', () => ({ body: newBody }));
   renderCanvas();
@@ -516,7 +535,9 @@ function setBlockStyleProp(key, value) {
   // overlay's own text is fully transparent by design, so without this an
   // unsaved color/font/size/align/weight/style/decoration/box-fill/box-border
   // pick has nothing to show in the real rendered text until the next save.
-  sendCanvasCommand('blockStyle', { id: block.id, style: block.style });
+  ids.forEach(targetId => {
+    sendCanvasCommand('blockStyle', { id: targetId, style: findBlock(blocks, targetId).style });
+  });
 }
 
 function getBodyInfo() {
@@ -539,6 +560,7 @@ function applyLayout(zoneId, blockId) {
   const zone = LAYOUT_ZONES.find(z => z.id === zoneId);
   if (!zone) return;
   const targetId = blockId != null ? blockId : getSelectedBlockId();
+  if (targetId == null) return; // nothing selected and no explicit target
 
   const blocks = parseBodyBlocks(slide.body);
   const block = findBlock(blocks, targetId);
@@ -605,6 +627,7 @@ function setBlockPositions(moves) { // moves: [{id, x, y}]
 // no longer any particular preset, so — like setBlockPosition — it clears
 // zone. Both axes commit as one mutation/undo-step.
 function setBlockPositionFields(id, x, y) {
+  if (id == null) return;
   const slide = getCurrentSlide();
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
@@ -626,6 +649,7 @@ function setBlockPositionFields(id, x, y) {
 // like rotate/flip, an explicit size only ever makes sense on a freeform
 // (explicit x/y) block.
 function setBlockSize(id, x, y, width, height) {
+  if (id == null) return;
   const slide = getCurrentSlide();
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
@@ -738,8 +762,9 @@ function selectBlock(id, opts) {
 
   if (additive) {
     if (targetIds.every(t => selectedBlockIds.includes(t))) {
+      // Shift-clicking the only selected block (or group) toggles it off
+      // entirely — matches Figma/Illustrator; deselecting is now valid.
       selectedBlockIds = selectedBlockIds.filter(s => !targetIds.includes(s));
-      if (!selectedBlockIds.length) selectedBlockIds = [id]; // never fully empty
     } else {
       selectedBlockIds = Array.from(new Set([...selectedBlockIds, ...targetIds]));
     }
@@ -759,7 +784,38 @@ function selectBlock(id, opts) {
       el.classList.toggle('is-selected', selectedBlockIds.includes(Number(el.dataset.blockId)));
     });
   }
+  refreshSelectionOverlay();
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
+}
+
+// Reconciles the per-block resize/rotate handles, the group bounding-box
+// overlay, and the Delete Block button's visibility to match the current
+// selection, without rebuilding any block element itself (see the comment
+// above on why: mid-gesture rebuilds break dblclick detection). Handle/bbox
+// elements are never a dblclick or drag target for the block itself, so
+// removing and re-adding just these is safe — needed because selectBlock's
+// own no-rebuild update would otherwise leave stale corner/rotate handles on
+// a block that just left a single-selection, leave a new multi-selection's
+// group bbox never rendered at all, or leave Delete Block visible/hidden
+// based on a stale selection (selection alone never otherwise triggers a
+// renderCanvas() call).
+function refreshSelectionOverlay() {
+  if (!canvasEl) return;
+  canvasEl.querySelectorAll('.canvas-resize-handle, .canvas-rotate-handle, .canvas-group-bbox').forEach(el => el.remove());
+  const deleteBlockBtn = canvasEl.querySelector('.canvas-delete-block-btn');
+  if (deleteBlockBtn) deleteBlockBtn.hidden = !canDeleteSelectedBlock();
+  const slide = getCurrentSlide();
+  const blocks = parseBodyBlocks(slide ? slide.body : '');
+  if (selectedBlockIds.length === 1) {
+    const block = findBlock(blocks, selectedBlockIds[0]);
+    const el = canvasEl.querySelector('.canvas-text-block[data-block-id="' + selectedBlockIds[0] + '"]');
+    if (el && block && !block.style.locked) {
+      ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].forEach(corner => renderResizeHandle(el, block.id, corner));
+      renderRotateHandle(el, block.id);
+    }
+  } else if (selectedBlockIds.length > 1 && !selectedBlockIds.some(id => findBlock(blocks, id).style.locked)) {
+    renderGroupBBox(selectedBlockIds);
+  }
 }
 
 // groupId is deterministic (lowest member id) rather than a separate
@@ -785,6 +841,7 @@ function groupBlocks(ids) {
 }
 
 function ungroupSelectedBlocks() {
+  if (!selectedBlockIds.length) return;
   const slide = getCurrentSlide();
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
@@ -858,21 +915,24 @@ function addTextBlock() {
 function canDeleteSelectedBlock() {
   const slide = getCurrentSlide();
   const blocks = parseBodyBlocks(slide ? slide.body : '');
-  if (blocks.length <= 1) return false;
-  return !findBlock(blocks, getSelectedBlockId()).style.locked;
+  const ids = getSelectedBlockIds();
+  if (!ids.length) return false; // nothing selected, nothing to delete
+  if (blocks.length - ids.length < 1) return false; // must keep >= 1 block
+  return !ids.some(id => findBlock(blocks, id).style.locked);
 }
 
 function deleteSelectedBlock() {
   const slide = getCurrentSlide();
   if (!slide) return;
   const blocks = parseBodyBlocks(slide.body);
-  if (blocks.length <= 1) return;
-  const id = getSelectedBlockId();
-  if (findBlock(blocks, id).style.locked) return;
-  const remaining = blocks.filter(b => b.id !== id);
+  const ids = getSelectedBlockIds();
+  if (!ids.length) return;
+  if (blocks.length - ids.length < 1) return;
+  if (ids.some(id => findBlock(blocks, id).style.locked)) return; // any-locked blocks the whole batch, matching group-drag's rule
+  const remaining = blocks.filter(b => !ids.includes(b.id));
   const newBody = serializeBodyBlocks(remaining);
   selectedBlockIds = [remaining[0].id];
-  mutateCurrentSlide('Delete text block', () => ({ body: newBody }));
+  mutateCurrentSlide('Delete text block' + (ids.length > 1 ? 's' : ''), () => ({ body: newBody }));
   renderCanvas();
   if (typeof _onSelectionChange === 'function') _onSelectionChange();
 }
@@ -1163,9 +1223,10 @@ function renderCanvas() {
     const blocks = parseBodyBlocks(slide.body);
     // Drop any selected id(s) that no longer exist (e.g. after undo/redo or
     // a delete elsewhere) rather than resetting the whole selection —
-    // preserves the rest of a multi-selection when only one member vanished.
+    // preserves the rest of a multi-selection when only one member vanished,
+    // and simply leaves an empty selection empty (see deselectAll) rather
+    // than forcing a fallback selection the user never chose.
     selectedBlockIds = selectedBlockIds.filter(id => blocks.some(b => b.id === id));
-    if (!selectedBlockIds.length) selectedBlockIds = [blocks[0].id];
     renderBlocksLayer(blocks, slide.top);
     resyncPreviewBlocks(blocks);
 
@@ -1239,16 +1300,21 @@ function renderBlocksLayer(blocks, slideTop) {
     inner.innerHTML = renderBodyPreview(block.content);
     el.appendChild(inner);
 
-    // Resize handles only for a single, unlocked selection — a multi-
-    // selection shows plain outlines with no handles (whole-selection
-    // bounding-box resize is out of scope for this phase).
+    // Resize + rotate handles only for a single, unlocked selection — a
+    // multi-selection gets its own whole-selection bounding-box handles
+    // instead (see renderGroupBBox, called once below after this loop).
     if (selectedBlockIds.length === 1 && selectedBlockIds[0] === block.id && !block.style.locked) {
-      ['nw', 'ne', 'sw', 'se'].forEach(corner => renderResizeHandle(el, block.id, corner));
+      ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].forEach(corner => renderResizeHandle(el, block.id, corner));
+      renderRotateHandle(el, block.id);
     }
 
     layer.appendChild(el);
     wireBlockEvents(el, block.id);
   });
+
+  if (selectedBlockIds.length > 1 && !selectedBlockIds.some(id => findBlock(blocks, id).style.locked)) {
+    renderGroupBBox(selectedBlockIds);
+  }
 }
 
 const RESIZE_MIN_SIZE = 24; // px — floor for both dimensions during a handle drag
@@ -1311,17 +1377,30 @@ function wireResizeHandle(handleEl, blockId, corner) {
         newWidth  = startWidth  + dx;
         newHeight = startHeight - dy;
         newTop    = startTop    + dy;
-      } else { // nw
+      } else if (corner === 'nw') {
         newWidth  = startWidth  - dx;
         newHeight = startHeight - dy;
         newLeft   = startLeft   + dx;
         newTop    = startTop    + dy;
+      } else if (corner === 'n') {
+        newHeight = startHeight - dy;
+        newTop    = startTop    + dy;
+      } else if (corner === 's') {
+        newHeight = startHeight + dy;
+      } else if (corner === 'e') {
+        newWidth  = startWidth  + dx;
+      } else { // w
+        newWidth  = startWidth  - dx;
+        newLeft   = startLeft   + dx;
       }
 
       newWidth  = Math.max(RESIZE_MIN_SIZE, newWidth);
       newHeight = Math.max(RESIZE_MIN_SIZE, newHeight);
 
-      if (constrain) {
+      // Edge handles (n/s/e/w) are inherently single-axis drags — Constrain
+      // only applies to the 4 corners, matching PowerPoint/Keynote/Figma
+      // (forcing a proportional change on an orthogonal drag is confusing).
+      if (constrain && corner.length === 2) {
         // Whichever axis moved proportionally more drives the other, then
         // left/top are re-derived from the corner's fixed-anchor rule using
         // the now-locked dimensions.
@@ -1391,6 +1470,254 @@ function wireResizeHandle(handleEl, blockId, corner) {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
+}
+
+// Degrees within this threshold of a cardinal angle soft-snap to it —
+// mirrors applyDragSnap's no-modifier-needed snap philosophy.
+const ROTATE_SNAP_THRESHOLD = 3;
+
+function renderRotateHandle(blockEl, blockId) {
+  const handle = document.createElement('div');
+  handle.className = 'canvas-rotate-handle';
+  blockEl.appendChild(handle);
+  wireRotateHandle(handle, blockId);
+}
+
+// Drag-to-rotate. The block's rendered center (getBoundingClientRect) stays
+// fixed as the pivot for the whole drag regardless of the current rotation —
+// rotating a box around its own transform-origin (the CSS default, 50% 50%)
+// never moves that center point. Ends by calling the exact same commit path
+// Phase 2's numeric angle field already uses.
+function wireRotateHandle(handleEl, blockId) {
+  handleEl.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const blockEl = handleEl.parentElement;
+    if (!blockEl) return;
+    const rect = blockEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const baseStyle = getStyleForBlockId(blockId);
+    let rotating = false;
+    let finalDeg = parseFloat(baseStyle.rotate) || 0;
+
+    function onMouseMove(e) {
+      rotating = true;
+      // +90 makes "handle pointing straight up" read as 0°, matching the
+      // handle's rendered position at the block's top-center.
+      let angle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180 / Math.PI + 90;
+      angle = ((angle % 360) + 360) % 360;
+      [0, 90, 180, 270, 360].forEach(snap => {
+        if (Math.abs(angle - snap) < ROTATE_SNAP_THRESHOLD) angle = snap % 360;
+      });
+      finalDeg = Math.round(angle);
+
+      let transform = 'translate(-50%, -50%) rotate(' + finalDeg + 'deg)';
+      if (baseStyle.flipH || baseStyle.flipV) {
+        transform += ' scale(' + (baseStyle.flipH ? -1 : 1) + ', ' + (baseStyle.flipV ? -1 : 1) + ')';
+      }
+      blockEl.style.transform = transform;
+      // Live-sync the preview, same technique as wireResizeHandle. Skip
+      // live-updating the Arrange tab's numeric field during the drag (the
+      // resize handles don't bother either) — syncInspector() picks up the
+      // final value once the drag commits below.
+      sendCanvasCommand('blockStyle', {
+        id: blockId,
+        style: Object.assign({}, baseStyle, { rotate: String(finalDeg) })
+      });
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (!rotating) return; // plain click on the handle, no drag — no-op
+      setBlockStyleProp('rotate', String(finalDeg));
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+// Whole-selection bounding-box resize overlay — rendered once (not per
+// block) after the main per-block loop, whenever 2+ unlocked blocks are
+// selected (an ad hoc multi-selection or a real Group, treated identically).
+// Reuses the existing corner-handle CSS class, just on a different parent.
+function renderGroupBBox(selectedIds) {
+  const layer = canvasEl.querySelector('.canvas-blocks-layer');
+  const stage = canvasEl.querySelector('.canvas-stage');
+  if (!layer || !stage) return;
+  const stageRect = stage.getBoundingClientRect();
+  const rects = selectedIds
+    .map(id => layer.querySelector('.canvas-text-block[data-block-id="' + id + '"]'))
+    .filter(Boolean)
+    .map(el => el.getBoundingClientRect());
+  if (rects.length < 2) return;
+
+  const left = Math.min(...rects.map(r => r.left)) - stageRect.left;
+  const top = Math.min(...rects.map(r => r.top)) - stageRect.top;
+  const right = Math.max(...rects.map(r => r.right)) - stageRect.left;
+  const bottom = Math.max(...rects.map(r => r.bottom)) - stageRect.top;
+
+  const bbox = document.createElement('div');
+  bbox.className = 'canvas-group-bbox';
+  bbox.style.left = left + 'px';
+  bbox.style.top = top + 'px';
+  bbox.style.width = (right - left) + 'px';
+  bbox.style.height = (bottom - top) + 'px';
+  layer.appendChild(bbox);
+
+  ['nw', 'ne', 'sw', 'se'].forEach(corner => {
+    const handle = document.createElement('div');
+    handle.className = 'canvas-resize-handle canvas-resize-' + corner;
+    bbox.appendChild(handle);
+    wireGroupResizeHandle(handle, selectedIds, corner);
+  });
+}
+
+// Group bounding-box resize. Structurally parallel to wireResizeHandle's
+// opposite-anchor corner math, but applied to the union bbox and then
+// uniformly (never non-uniform — a per-drag free/proportional toggle wasn't
+// asked for, and skewing a multi-block layout reads as broken far more
+// often than intentional) to every member's own rect around that same
+// anchor point.
+function wireGroupResizeHandle(handleEl, ids, corner) {
+  handleEl.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const stage = canvasEl.querySelector('.canvas-stage');
+    const layer = canvasEl.querySelector('.canvas-blocks-layer');
+    const bboxEl = handleEl.parentElement;
+    if (!stage || !layer || !bboxEl) return;
+    const stageRect = stage.getBoundingClientRect();
+
+    const members = ids.map(id => {
+      const el = layer.querySelector('.canvas-text-block[data-block-id="' + id + '"]');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { id, el, left: r.left - stageRect.left, top: r.top - stageRect.top, width: r.width, height: r.height };
+    }).filter(Boolean);
+    if (members.length < 2) return;
+
+    const groupLeft = Math.min(...members.map(m => m.left));
+    const groupTop = Math.min(...members.map(m => m.top));
+    const groupRight = Math.max(...members.map(m => m.left + m.width));
+    const groupBottom = Math.max(...members.map(m => m.top + m.height));
+    const groupWidth = groupRight - groupLeft;
+    const groupHeight = groupBottom - groupTop;
+
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+    let resizing = false;
+
+    function onMouseMove(e) {
+      const dx = e.clientX - startMouseX;
+      const dy = e.clientY - startMouseY;
+      if (!resizing && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) resizing = true;
+      if (!resizing) return;
+
+      let newWidth = groupWidth, newHeight = groupHeight;
+      if (corner === 'se') { newWidth = groupWidth + dx; newHeight = groupHeight + dy; }
+      else if (corner === 'sw') { newWidth = groupWidth - dx; newHeight = groupHeight + dy; }
+      else if (corner === 'ne') { newWidth = groupWidth + dx; newHeight = groupHeight - dy; }
+      else { newWidth = groupWidth - dx; newHeight = groupHeight - dy; } // nw
+
+      newWidth  = Math.max(RESIZE_MIN_SIZE, newWidth);
+      newHeight = Math.max(RESIZE_MIN_SIZE, newHeight);
+      // Always uniform: whichever axis moved proportionally more drives the
+      // other, same rule single-block corner-resize uses when constrain is on.
+      const scaleX = newWidth / groupWidth;
+      const scaleY = newHeight / groupHeight;
+      const scale = Math.abs(scaleX - 1) > Math.abs(scaleY - 1) ? scaleX : scaleY;
+
+      const anchorX = (corner === 'sw' || corner === 'nw') ? groupRight : groupLeft;
+      const anchorY = (corner === 'ne' || corner === 'nw') ? groupBottom : groupTop;
+
+      bboxEl.style.left   = (anchorX + (groupLeft - anchorX) * scale) + 'px';
+      bboxEl.style.top    = (anchorY + (groupTop  - anchorY) * scale) + 'px';
+      bboxEl.style.width  = (groupWidth  * scale) + 'px';
+      bboxEl.style.height = (groupHeight * scale) + 'px';
+
+      const sr = stage.getBoundingClientRect();
+      members.forEach(m => {
+        const ml = anchorX + (m.left - anchorX) * scale;
+        const mt = anchorY + (m.top  - anchorY) * scale;
+        const mw = m.width  * scale;
+        const mh = m.height * scale;
+        m.el.style.position  = 'absolute';
+        m.el.style.left      = ml + 'px';
+        m.el.style.top       = mt + 'px';
+        m.el.style.width     = mw + 'px';
+        m.el.style.height    = mh + 'px';
+        m.el.style.maxWidth  = 'none';
+        m.el.style.transform = 'none';
+
+        const baseStyle = getStyleForBlockId(m.id);
+        sendCanvasCommand('blockStyle', {
+          id: m.id,
+          style: Object.assign({}, baseStyle, {
+            x: (((ml + mw / 2) / sr.width)  * 100).toFixed(2),
+            y: (((mt + mh / 2) / sr.height) * 100).toFixed(2),
+            width:  ((mw / sr.width)  * 100).toFixed(2),
+            height: ((mh / sr.height) * 100).toFixed(2)
+          })
+        });
+      });
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (!resizing) return; // plain click on the handle, no drag — no-op
+
+      const sr = stage.getBoundingClientRect();
+      const entries = members.map(m => {
+        const r = m.el.getBoundingClientRect();
+        const entry = {
+          id: m.id,
+          x: ((r.left + r.width  / 2 - sr.left) / sr.width)  * 100,
+          y: ((r.top  + r.height / 2 - sr.top)  / sr.height) * 100,
+          width:  (r.width  / sr.width)  * 100,
+          height: (r.height / sr.height) * 100
+        };
+        m.el.style.position  = '';
+        m.el.style.left      = '';
+        m.el.style.top       = '';
+        m.el.style.width     = '';
+        m.el.style.height    = '';
+        m.el.style.maxWidth  = '';
+        m.el.style.transform = '';
+        return entry;
+      });
+      setBlockPositionsAndSizes(entries);
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+// Batched position+size commit for a group-resize — mirrors setBlockPositions'
+// batching shape, extended to also carry size, since setBlockSize only ever
+// handles one block at a time.
+function setBlockPositionsAndSizes(entries) { // [{id, x, y, width, height}]
+  const slide = getCurrentSlide();
+  if (!slide || !entries.length) return;
+  const blocks = parseBodyBlocks(slide.body);
+  entries.forEach(({ id, x, y, width, height }) => {
+    const block = findBlock(blocks, id);
+    block.style = Object.assign({}, block.style, {
+      x: x.toFixed(2), y: y.toFixed(2), width: width.toFixed(2), height: height.toFixed(2), zone: ''
+    });
+    block.explicit = true;
+  });
+  const newBody = serializeBodyBlocks(blocks);
+  mutateCurrentSlide('Resize blocks', () => ({ body: newBody }));
+  renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
 }
 
 // Wiring that only ever applies once to the shared, non-repeating parts of
@@ -1480,6 +1807,93 @@ function wireStaticEvents(container) {
       commitEdit(textarea);
     });
   }
+
+  wireMarqueeSelect(container);
+}
+
+// Clears the selection entirely — e.g. a plain click on empty canvas
+// background. selectedBlockIds is allowed to be empty (see its
+// declaration); every mutator that depends on a selection guards against
+// this instead of assuming a fallback block.
+function deselectAll() {
+  if (!selectedBlockIds.length) return;
+  selectedBlockIds = [];
+  if (canvasEl) {
+    canvasEl.querySelectorAll('.canvas-text-block.is-selected').forEach(el => el.classList.remove('is-selected'));
+  }
+  refreshSelectionOverlay();
+  if (typeof _onSelectionChange === 'function') _onSelectionChange();
+}
+
+// Rubber-band selection: mousedown on the empty canvas background (not on
+// any block) drags out a rectangle; every block it overlaps becomes the new
+// selection on mouseup. A plain click-with-no-drag deselects everything
+// instead (unless a modifier is held — shift/ctrl-clicking empty
+// background has nothing to add/toggle, so it stays a no-op rather than
+// wiping an existing selection the user may still want).
+function wireMarqueeSelect(container) {
+  const layer = container.querySelector('.canvas-blocks-layer');
+  if (!layer) return;
+
+  layer.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    if (e.target !== layer) return; // bail if the mousedown landed on a block, not the empty background
+    const stage = container.querySelector('.canvas-stage');
+    if (!stage) return;
+    const stageRect = stage.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    let marqueeEl = null;
+
+    function onMouseMove(e) {
+      const x1 = Math.min(startX, e.clientX), x2 = Math.max(startX, e.clientX);
+      const y1 = Math.min(startY, e.clientY), y2 = Math.max(startY, e.clientY);
+      if (!marqueeEl && (x2 - x1 > 4 || y2 - y1 > 4)) {
+        marqueeEl = document.createElement('div');
+        marqueeEl.className = 'canvas-marquee';
+        layer.appendChild(marqueeEl);
+      }
+      if (!marqueeEl) return;
+      marqueeEl.style.left = (x1 - stageRect.left) + 'px';
+      marqueeEl.style.top = (y1 - stageRect.top) + 'px';
+      marqueeEl.style.width = (x2 - x1) + 'px';
+      marqueeEl.style.height = (y2 - y1) + 'px';
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (!marqueeEl) { if (!additive) deselectAll(); return; } // plain click on background, no drag
+      const mRect = marqueeEl.getBoundingClientRect();
+      marqueeEl.remove();
+      // Any-overlap hit test (not full containment) — more forgiving, matches
+      // Illustrator's default marquee behavior. Locked blocks are included:
+      // they're already selectable via a plain click, so marquee shouldn't
+      // treat them differently.
+      const hitIds = [...layer.querySelectorAll('.canvas-text-block')]
+        .filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.left < mRect.right && r.right > mRect.left && r.top < mRect.bottom && r.bottom > mRect.top;
+        })
+        .map(el => Number(el.dataset.blockId));
+      if (!hitIds.length) return; // never replace selection with an empty result
+      if (additive) {
+        hitIds.forEach(id => selectBlock(id, { additive: true }));
+      } else {
+        selectedBlockIds = hitIds;
+        if (canvasEl) {
+          canvasEl.querySelectorAll('.canvas-text-block').forEach(el => {
+            el.classList.toggle('is-selected', selectedBlockIds.includes(Number(el.dataset.blockId)));
+          });
+        }
+        refreshSelectionOverlay();
+        if (typeof _onSelectionChange === 'function') _onSelectionChange();
+      }
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
 }
 
 // Per-block drag/select/dblclick wiring. Called once for each block element

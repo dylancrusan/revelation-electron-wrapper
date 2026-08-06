@@ -157,6 +157,53 @@
 .canvas-resize-ne { top: -4px; right: -4px; cursor: nesw-resize; }
 .canvas-resize-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
 .canvas-resize-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.canvas-resize-n { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.canvas-resize-s { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.canvas-resize-e { top: 50%; right: -4px; transform: translateY(-50%); cursor: ew-resize; }
+.canvas-resize-w { top: 50%; left: -4px; transform: translateY(-50%); cursor: ew-resize; }
+
+/* Drag-to-rotate handle — small circle above the block's top-center. */
+.canvas-rotate-handle {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1.5px solid rgba(78,106,255,0.85);
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 5;
+}
+.canvas-rotate-handle:active { cursor: grabbing; }
+.canvas-rotate-handle::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+/* Rubber-band marquee selection rectangle. */
+.canvas-marquee {
+  position: absolute;
+  border: 1px solid rgba(78,106,255,0.85);
+  background: rgba(78,106,255,0.12);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Whole-selection bounding-box overlay for a multi-selection resize — same
+   visual treatment as .canvas-text-block.is-selected's outline. Only its
+   corner-handle children (appended by renderGroupBBox) are interactive. */
+.canvas-group-bbox {
+  position: absolute;
+  outline: 2px solid rgba(78,106,255,0.85);
+  outline-offset: 3px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 5;
+}
+.canvas-group-bbox .canvas-resize-handle { pointer-events: auto; }
 
 /* Layout zone positions — each sizes to its own content (matching the real
    renderer's .revelation-block rules in revelation/css/source/custom/

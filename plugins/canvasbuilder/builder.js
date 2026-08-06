@@ -120,18 +120,24 @@ export function getBuilderExtensions(ctx = {}) {
 
     // Arrange tab — lock state gates Order/Position (Order/Position/Lock stay
     // primary-block-only during a multi-selection, matching Style/Text tab
-    // controls — not part of the multi-select ask).
+    // controls — not part of the multi-select ask). hasSelection additionally
+    // gates all of these off entirely once nothing is selected (see
+    // deselectAll in canvas-editor.js) — style/pos/etc. still read as
+    // whatever block 1 happens to be (findBlock's own fallback), but every
+    // control that would act on "the selection" is disabled rather than
+    // silently acting on that fallback block.
     const locked = !!style.locked;
     const ids = getSelectedBlockIds();
     const isMulti = ids.length > 1;
+    const hasSelection = ids.length > 0;
     const lockBtn   = document.getElementById('insp-lock-btn');
     const unlockBtn = document.getElementById('insp-unlock-btn');
-    if (lockBtn)   lockBtn.disabled   = locked;
-    if (unlockBtn) unlockBtn.disabled = !locked;
+    if (lockBtn)   lockBtn.disabled   = locked || !hasSelection;
+    if (unlockBtn) unlockBtn.disabled = !locked || !hasSelection;
     ['insp-order-front-btn', 'insp-order-back-btn', 'insp-order-forward-btn', 'insp-order-backward-btn']
       .forEach(id => {
         const btn = document.getElementById(id);
-        if (btn) btn.disabled = locked;
+        if (btn) btn.disabled = locked || !hasSelection;
       });
 
     // Position — shown as percent of stage width/height (the block's own
@@ -139,12 +145,12 @@ export function getBuilderExtensions(ctx = {}) {
     const posX = document.getElementById('insp-pos-x');
     const posY = document.getElementById('insp-pos-y');
     const pos = getResolvedBlockPosition();
-    if (posX && document.activeElement !== posX) { posX.value = Math.round(pos.x * 10) / 10; posX.disabled = locked; }
-    if (posY && document.activeElement !== posY) { posY.value = Math.round(pos.y * 10) / 10; posY.disabled = locked; }
+    if (posX && document.activeElement !== posX) { posX.value = Math.round(pos.x * 10) / 10; posX.disabled = locked || !hasSelection; }
+    if (posY && document.activeElement !== posY) { posY.value = Math.round(pos.y * 10) / 10; posY.disabled = locked || !hasSelection; }
 
     // Rotate / Flip — single-select + unlocked only (no batch-rotate across
     // a multi-selection in this phase).
-    const rotateDisabled = isMulti || locked;
+    const rotateDisabled = isMulti || locked || !hasSelection;
     const rotateInput = document.getElementById('insp-rotate-angle');
     const flipHBtn = document.getElementById('insp-flip-h-btn');
     const flipVBtn = document.getElementById('insp-flip-v-btn');
@@ -157,7 +163,7 @@ export function getBuilderExtensions(ctx = {}) {
 
     // Size — single-select + unlocked only, same gating as Rotate (no
     // whole-selection bounding-box resize in this phase).
-    const sizeDisabled = isMulti || locked;
+    const sizeDisabled = isMulti || locked || !hasSelection;
     const sizeWidthInput = document.getElementById('insp-size-width');
     const sizeHeightInput = document.getElementById('insp-size-height');
     const sizeConstrainCheckbox = document.getElementById('insp-size-constrain');
@@ -179,7 +185,7 @@ export function getBuilderExtensions(ctx = {}) {
     const groupBtn   = document.getElementById('insp-group-btn');
     const ungroupBtn = document.getElementById('insp-ungroup-btn');
     if (groupBtn)   groupBtn.disabled   = ids.length < 2;
-    if (ungroupBtn) ungroupBtn.disabled = !style.groupId;
+    if (ungroupBtn) ungroupBtn.disabled = !style.groupId || !hasSelection;
 
     // Distribute — needs 3+ selected, none locked.
     const distributeEligible = ids.length >= 3 && !ids.some(id => getStyleForBlockId(id).locked);
