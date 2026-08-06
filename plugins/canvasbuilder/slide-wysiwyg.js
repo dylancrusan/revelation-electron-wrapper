@@ -76,8 +76,14 @@ function macroLabel(line) {
   return '\u2699 macro';
 }
 
-// Apply inline markdown (bold/italic/underline/strikethrough/links) to a text segment.
-function inlineMarkdownToHtml(text) {
+// Apply just the markdown-syntax replacements (bold/italic/underline/
+// strikethrough/links) to a plain-text segment — escapes it first (so **, *,
+// etc. can't be spoofed via embedded HTML) then layers on the HTML those
+// symbols represent. Only ever called on a real DOM TEXT_NODE's content
+// (see inlineMarkdownToHtml below), never on a segment that might itself
+// contain real embedded HTML tags — those are already-parsed elements by
+// that point, not text this function will ever see.
+function markdownSyntaxToHtml(text) {
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -88,6 +94,39 @@ function inlineMarkdownToHtml(text) {
     .replace(/__([^_<>]+?)__/g, '<u>$1</u>')
     .replace(/~~([^~<>]+?)~~/g, '<s>$1</s>')
     .replace(/\[([^\]<>]+?)\]\(([^)\s<>]+?)\)/g, '<a href="$2">$1</a>');
+}
+
+// Recursively applies markdown-syntax formatting to the TEXT content of a
+// parsed fragment, leaving any real HTML elements already present (e.g. a
+// <span style="..."> an author embedded directly in the slide's markdown
+// source) untouched structurally — only recursing into their children so
+// markdown syntax still works inside them too.
+function applyMarkdownSyntaxToNode(root) {
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const span = document.createElement('span');
+      span.innerHTML = markdownSyntaxToHtml(child.textContent);
+      child.replaceWith(...span.childNodes);
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      applyMarkdownSyntaxToNode(child);
+    }
+  }
+}
+
+// Convert a raw slide-body line — markdown syntax plus any raw HTML an author
+// embedded directly in the source (e.g. the <span style="font-size:0.85em">
+// trick used to shrink a closing quote mark) — into HTML for the
+// contenteditable editor. Parsed via a <template> (inert: nothing in it ever
+// executes, matching how html-sanitization.js's own sanitizeHTMLFragment
+// parses untrusted markup) rather than blanket-escaping every `<`/`>` first,
+// so real embedded tags survive as real markup instead of showing up as
+// visible, editable tag text — see nodeToMarkdown below for the matching
+// save-side fix that keeps such tags from being silently dropped again.
+function inlineMarkdownToHtml(text) {
+  const template = document.createElement('template');
+  template.innerHTML = text;
+  applyMarkdownSyntaxToNode(template.content);
+  return template.innerHTML;
 }
 
 // Walk a DOM node tree and convert to markdown, preserving styled <span> as HTML.
@@ -118,7 +157,18 @@ function nodeToMarkdown(node) {
     } else if (tag === 'br') {
       result += '\n';
     } else {
-      result += inner;
+      // Any other real element only ever gets here via inlineMarkdownToHtml's
+      // own HTML parsing (see its comment) — i.e. it's a tag the slide's
+      // markdown source embedded directly and wasn't already covered above.
+      // Reconstructing it with its attributes (rather than discarding the
+      // wrapper and keeping only inner) is what makes that round-trip
+      // lossless; the real compiler's own sanitizer (html-sanitization.js)
+      // is permissive by default (block-list, not allow-list), so this can't
+      // introduce a tag the compiled slide wouldn't already have accepted.
+      const attrs = Array.from(child.attributes || [])
+        .map((attr) => ` ${attr.name}="${attr.value.replace(/"/g, '&quot;')}"`)
+        .join('');
+      result += `<${tag}${attrs}>${inner}</${tag}>`;
     }
   }
   return result;
@@ -140,6 +190,17 @@ function bodyToHtml(markdown) {
   let listType = null;
   let listItems = [];
   let quoteLines = null;
+  // Consecutive plain-text lines with no blank line between them are one
+  // markdown paragraph, not one <p> per source line — the real compiler
+  // (reveal.js's bundled marked, default breaks:false) joins them and lets
+  // the result reflow to the container width, same as any other soft line
+  // break. Emitting a separate <p> per line here used to force a paragraph
+  // break exactly where the author happened to wrap their source text,
+  // which both wraps differently than the live slide AND, for a
+  // dark/light-bg block, paints one pill box per source line instead of
+  // one pill around the whole reflowed paragraph (see styles.css's
+  // .canvas-text-editor.has-darkbg/.has-lightbg p rules).
+  let paragraphLines = null;
 
   const flushList = () => {
     if (!listType || !listItems.length) return;
@@ -157,7 +218,16 @@ function bodyToHtml(markdown) {
     quoteLines = null;
   };
 
-  const flushAll = () => { flushList(); flushQuote(); };
+  const flushParagraph = () => {
+    if (!paragraphLines) return;
+    // Joined with a space, matching how the real renderer displays a
+    // CommonMark soft line break (rendered whitespace, not a forced <br>).
+    const inner = paragraphLines.map((l) => inlineMarkdownToHtml(l)).join(' ');
+    blocks.push(`<p>${inner}</p>`);
+    paragraphLines = null;
+  };
+
+  const flushAll = () => { flushList(); flushQuote(); flushParagraph(); };
 
   for (const line of lines) {
     if (isSlideBodyMacro(line)) {
@@ -189,40 +259,40 @@ function bodyToHtml(markdown) {
 
     const quote = trimmed.match(/^>\s?(.*)$/);
     if (quote) {
-      if (!quoteLines) { flushList(); quoteLines = []; }
+      if (!quoteLines) { flushList(); flushParagraph(); quoteLines = []; }
       quoteLines.push(quote[1]);
       continue;
     }
     flushQuote();
 
     const h6 = trimmed.match(/^###### (.+)$/);
-    if (h6) { flushList(); blocks.push(`<h6>${inlineMarkdownToHtml(h6[1])}</h6>`); continue; }
+    if (h6) { flushList(); flushParagraph(); blocks.push(`<h6>${inlineMarkdownToHtml(h6[1])}</h6>`); continue; }
 
     const h5 = trimmed.match(/^##### (.+)$/);
-    if (h5) { flushList(); blocks.push(`<h5>${inlineMarkdownToHtml(h5[1])}</h5>`); continue; }
+    if (h5) { flushList(); flushParagraph(); blocks.push(`<h5>${inlineMarkdownToHtml(h5[1])}</h5>`); continue; }
 
     const h4 = trimmed.match(/^#### (.+)$/);
-    if (h4) { flushList(); blocks.push(`<h4>${inlineMarkdownToHtml(h4[1])}</h4>`); continue; }
+    if (h4) { flushList(); flushParagraph(); blocks.push(`<h4>${inlineMarkdownToHtml(h4[1])}</h4>`); continue; }
 
     const h3 = trimmed.match(/^### (.+)$/);
-    if (h3) { flushList(); blocks.push(`<h3>${inlineMarkdownToHtml(h3[1])}</h3>`); continue; }
+    if (h3) { flushList(); flushParagraph(); blocks.push(`<h3>${inlineMarkdownToHtml(h3[1])}</h3>`); continue; }
 
     const h2 = trimmed.match(/^## (.+)$/);
-    if (h2) { flushList(); blocks.push(`<h2>${inlineMarkdownToHtml(h2[1])}</h2>`); continue; }
+    if (h2) { flushList(); flushParagraph(); blocks.push(`<h2>${inlineMarkdownToHtml(h2[1])}</h2>`); continue; }
 
     const h1 = trimmed.match(/^# (.+)$/);
-    if (h1) { flushList(); blocks.push(`<h1>${inlineMarkdownToHtml(h1[1])}</h1>`); continue; }
+    if (h1) { flushList(); flushParagraph(); blocks.push(`<h1>${inlineMarkdownToHtml(h1[1])}</h1>`); continue; }
 
     const bullet = trimmed.match(/^- (.*)$/);
     if (bullet) {
-      if (listType !== 'ul') { flushList(); listType = 'ul'; }
+      if (listType !== 'ul') { flushList(); flushParagraph(); listType = 'ul'; }
       listItems.push(bullet[1]);
       continue;
     }
 
     const numbered = trimmed.match(/^\d+\. (.*)$/);
     if (numbered) {
-      if (listType !== 'ol') { flushList(); listType = 'ol'; }
+      if (listType !== 'ol') { flushList(); flushParagraph(); listType = 'ol'; }
       listItems.push(numbered[1]);
       continue;
     }
@@ -232,12 +302,14 @@ function bodyToHtml(markdown) {
     const verseRef = trimmed.match(/^_(?!_)(.+?)(?<!_)_$/);
     if (verseRef) {
       flushList();
+      flushParagraph();
       blocks.push(`<p class="slide-wysiwyg-verse-ref">${inlineMarkdownToHtml(verseRef[1])}</p>`);
       continue;
     }
 
     flushList();
-    blocks.push(`<p>${inlineMarkdownToHtml(trimmed)}</p>`);
+    if (!paragraphLines) paragraphLines = [];
+    paragraphLines.push(trimmed);
   }
 
   flushAll();
@@ -250,6 +322,13 @@ function htmlToBody(html) {
   const temp = document.createElement('div');
   temp.innerHTML = html;
   const lines = [];
+  // True only right after pushing a non-empty generic (unclassed) <p>'s text.
+  // bodyToHtml now emits exactly one <p> per real paragraph (see its own
+  // comment), so two of these in a row can only mean the user pressed Enter
+  // inside the editor to start a genuinely new paragraph — without a blank
+  // line between them here, the real compiler (marked, breaks:false) would
+  // silently rejoin them into one paragraph next time this text is compiled.
+  let prevWasParagraph = false;
 
   const extractInline = (el) => inlineHtmlToMarkdown(el.innerHTML || '');
 
@@ -257,12 +336,15 @@ function htmlToBody(html) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = (node.textContent || '').trim();
       if (text) lines.push(text);
+      prevWasParagraph = false;
       continue;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) continue;
 
     const el = node;
     const tag = el.tagName.toLowerCase();
+    const wasPrevParagraph = prevWasParagraph;
+    prevWasParagraph = false;
 
     // Macro div — restore original markdown line verbatim
     if (typeof el.dataset.macro === 'string') {
@@ -315,7 +397,11 @@ function htmlToBody(html) {
       lines.push('');
     } else {
       const text = extractInline(el);
-      lines.push(text === '' ? '' : text);
+      if (text !== '') {
+        if (wasPrevParagraph) lines.push('');
+        prevWasParagraph = true;
+      }
+      lines.push(text);
     }
   }
 
