@@ -406,7 +406,92 @@ function updateCanvasScale(stageEl) {
   // Measured directly: the plain w/1920*100 formula renders headings a
   // uniform ~1.128x wider on-screen than the real renderer, across h1/h3/h6
   // alike — this divisor corrects for that.
-  if (w > 0) el.style.fontSize = (w / 1920 * 100 / 1.128) + 'px';
+  if (w > 0) {
+    // Set on .canvas-stage-wrap (the shared ancestor), not .canvas-stage
+    // itself — every block's em-based h1-h6/p sizing (.canvas-text-inner,
+    // .canvas-text-editor) inherits this scaled font-size, and .canvas-
+    // pasteboard needs the same value too. It's a *sibling* of .canvas-
+    // stage under .canvas-zoom-viewport, not a descendant (see
+    // syncPasteboardToStage below for why: .canvas-stage stays
+    // overflow:hidden to clip the background iframe, but the pasteboard
+    // deliberately doesn't clip, so a dragged-off block stays visible past
+    // the slide edge) — setting it only on .canvas-stage wouldn't reach
+    // that sibling branch at all.
+    const wrap = el.closest('.canvas-stage-wrap') || el;
+    wrap.style.fontSize = (w / 1920 * 100 / 1.128) + 'px';
+  }
+}
+
+// Keeps .canvas-pasteboard's own box in exact pixel sync with .canvas-
+// stage's live rect (position *and* size — the stage's on-screen box moves
+// within .canvas-zoom-viewport whenever zoom/scroll/centering changes it,
+// not just when it resizes). .canvas-blocks-layer/.canvas-text-editor
+// position/size themselves as percentages of their nearest positioned
+// ancestor — which used to be .canvas-stage itself, and is now .canvas-
+// pasteboard instead — so every existing bit of stage-relative percentage
+// math in this file keeps meaning exactly what it always did as long as
+// this stays in sync.
+function syncPasteboardToStage(stageEl) {
+  const viewport = stageEl && stageEl.closest('.canvas-zoom-viewport');
+  const pasteboard = viewport && viewport.querySelector('.canvas-pasteboard');
+  if (!viewport || !pasteboard) return;
+  const viewportRect = viewport.getBoundingClientRect();
+  const stageRect = stageEl.getBoundingClientRect();
+  pasteboard.style.left   = (stageRect.left - viewportRect.left) + 'px';
+  pasteboard.style.top    = (stageRect.top  - viewportRect.top)  + 'px';
+  pasteboard.style.width  = stageRect.width  + 'px';
+  pasteboard.style.height = stageRect.height + 'px';
+}
+
+// Pan/zoom for the canvas stage — lets a block be dragged out to (and edited
+// on) the margin around the slide without that margin depending on luck
+// (whatever slack the panel's own aspect ratio happens to leave over a
+// 16:9 stage sized to fill it completely, which is frequently ~0). Zoom is
+// expressed relative to "fits .canvas-zoom-viewport exactly, no margin"
+// (=1.0) — the old behavior — recomputed live off the viewport's current
+// size, so it still tracks window/panel resizes the same way the old
+// aspect-ratio/max-width CSS trick did, just via JS instead.
+const CANVAS_ZOOM_MIN = 0.25;
+const CANVAS_ZOOM_MAX = 2.5;
+const CANVAS_ZOOM_STEP = 0.1;
+// Deliberately < 1 (not "fits exactly") so the margin needed to drag/drop a
+// block off the slide is visible from the very first render, with no zoom
+// interaction required — a block sitting right at the slide edge (e.g. the
+// common case of a credit/attribution box) used to render clipped at
+// whatever the panel's incidental aspect-ratio slack happened to be, often
+// none at all.
+const CANVAS_ZOOM_DEFAULT = 0.8;
+const CANVAS_ZOOM_STORAGE_KEY = 'canvas-builder-zoom';
+
+let canvasZoom = CANVAS_ZOOM_DEFAULT;
+try {
+  const stored = parseFloat(localStorage.getItem(CANVAS_ZOOM_STORAGE_KEY));
+  if (Number.isFinite(stored)) canvasZoom = Math.max(CANVAS_ZOOM_MIN, Math.min(CANVAS_ZOOM_MAX, stored));
+} catch { /* localStorage unavailable — fall back to the default */ }
+
+// Sizes .canvas-stage to fitWidth/fitHeight (the largest 16:9 box that fits
+// .canvas-zoom-viewport's *current* box with no margin) times zoom, then
+// re-derives everything that depends on the stage's resulting on-screen
+// rect (font scale, pasteboard sync) — the same two calls the old resize
+// observer made directly, now routed through here since zoom changes need
+// them too and a resize is just "recompute at the zoom already in effect".
+function applyCanvasZoom(zoom) {
+  if (!canvasEl) return;
+  const viewport = canvasEl.querySelector('.canvas-zoom-viewport');
+  const stage = canvasEl.querySelector('.canvas-stage');
+  if (!viewport || !stage) return;
+  canvasZoom = Math.max(CANVAS_ZOOM_MIN, Math.min(CANVAS_ZOOM_MAX, zoom));
+  const vw = viewport.clientWidth;
+  const vh = viewport.clientHeight;
+  if (vw <= 0 || vh <= 0) return; // panel not laid out yet (e.g. hidden tab)
+  const fitWidth = Math.min(vw, vh * 16 / 9);
+  stage.style.width  = (fitWidth * canvasZoom) + 'px';
+  stage.style.height = (fitWidth * 9 / 16 * canvasZoom) + 'px';
+  updateCanvasScale(stage);
+  syncPasteboardToStage(stage);
+  const label = canvasEl.querySelector('.canvas-zoom-label');
+  if (label) label.textContent = Math.round(canvasZoom * 100) + '%';
+  try { localStorage.setItem(CANVAS_ZOOM_STORAGE_KEY, String(canvasZoom)); } catch { /* ignore */ }
 }
 
 // reveal.js's own `margin` config (0.04 — reveal's built-in default; nothing
@@ -1403,17 +1488,34 @@ function renderCanvas() {
         '<button class="canvas-act-btn canvas-split-line-btn" type="button" hidden title="Move the line at your cursor into its own independently-positioned box">Split Line Into Box</button>' +
       '</div>' +
       '<div class="canvas-stage-wrap">' +
-        '<div class="canvas-stage">' +
-          '<div class="canvas-zone-hints" hidden>' + zoneHints + '</div>' +
-          '<div class="canvas-center-guide canvas-center-guide-v" hidden></div>' +
-          '<div class="canvas-center-guide canvas-center-guide-h" hidden></div>' +
-          '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-top" hidden></div>' +
-          '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-bottom" hidden></div>' +
-          '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-left" hidden></div>' +
-          '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-right" hidden></div>' +
-          '<div class="canvas-blocks-layer"></div>' +
-          '<div class="canvas-text-editor slide-wysiwyg-editor" contenteditable="true" spellcheck="true" hidden placeholder="Type slide text here…"></div>' +
-          '<div class="canvas-drag-hint">Double-click to edit · Drag to reposition</div>' +
+        '<div class="canvas-zoom-viewport">' +
+          '<div class="canvas-stage">' +
+            '<div class="canvas-zone-hints" hidden>' + zoneHints + '</div>' +
+            '<div class="canvas-center-guide canvas-center-guide-v" hidden></div>' +
+            '<div class="canvas-center-guide canvas-center-guide-h" hidden></div>' +
+            '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-top" hidden></div>' +
+            '<div class="canvas-eq-gauge canvas-eq-gauge-v canvas-eq-gauge-bottom" hidden></div>' +
+            '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-left" hidden></div>' +
+            '<div class="canvas-eq-gauge canvas-eq-gauge-h canvas-eq-gauge-right" hidden></div>' +
+            '<div class="canvas-drag-hint">Double-click to edit · Drag to reposition</div>' +
+          '</div>' +
+          // Sibling of .canvas-stage, not a descendant — kept in exact pixel
+          // sync with the stage's own rect by syncPasteboardToStage below,
+          // but (unlike .canvas-stage, which stays overflow:hidden to clip
+          // the background iframe) never clips its own content, so a block
+          // dragged past the slide edge stays visible/grabbable on the
+          // surrounding canvas area instead of disappearing the instant it
+          // crosses the stage boundary.
+          '<div class="canvas-pasteboard">' +
+            '<div class="canvas-blocks-layer"></div>' +
+            '<div class="canvas-text-editor slide-wysiwyg-editor" contenteditable="true" spellcheck="true" hidden placeholder="Type slide text here…"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="canvas-zoom-controls">' +
+          '<button class="canvas-zoom-btn" type="button" data-zoom-action="out" title="Zoom out">−</button>' +
+          '<button class="canvas-zoom-label" type="button" data-zoom-action="reset" title="Reset zoom">100%</button>' +
+          '<button class="canvas-zoom-btn" type="button" data-zoom-action="in" title="Zoom in">+</button>' +
+          '<button class="canvas-zoom-btn canvas-zoom-fit" type="button" data-zoom-action="fit" title="Fit slide exactly (no margin)">⤢</button>' +
         '</div>' +
       '</div>';
 
@@ -1428,20 +1530,49 @@ function renderCanvas() {
     canvasIframeEl.src = buildPreviewUrl();
 
     const stage = canvasEl.querySelector('.canvas-stage');
+    const viewport = canvasEl.querySelector('.canvas-zoom-viewport');
     stage.insertBefore(canvasIframeEl, stage.firstChild);
 
-    // Keep the invisible per-block hit-box/selection-outline text sized to
-    // match the stage's actual rendered pixel size. (This was previously
-    // defined but never called, so the em-based .canvas-h1/h6/etc sizing
-    // fell back to the browser default font-size — harmless while the text
-    // stayed fully transparent with no visible outline, but it makes the
-    // block's real bounding box, and so the drag hit-target and the
-    // .is-selected outline, badly mismatch the actual rendered text.)
-    updateCanvasScale(stage);
+    // Sizes .canvas-stage (and, via applyCanvasZoom, the font scale +
+    // pasteboard sync that depend on its resulting rect) for the first
+    // time. Previously this was a plain CSS aspect-ratio/max-width trick
+    // with no JS involved at all; it needs to be JS-driven now so the same
+    // math can express *less* than a full fit (the default margin) and
+    // *more* than a full fit (zooming in), neither of which "fill the
+    // parent" CSS sizing can do.
+    applyCanvasZoom(canvasZoom);
     if (typeof ResizeObserver !== 'undefined') {
-      const scaleObserver = new ResizeObserver(() => updateCanvasScale(stage));
-      scaleObserver.observe(stage);
+      // Observes .canvas-zoom-viewport, not .canvas-stage — the viewport's
+      // own box (not the stage's) is what fitWidth/fitHeight are computed
+      // from, so a panel/window resize needs to re-run that computation at
+      // the zoom already in effect, not just re-measure the stage.
+      const scaleObserver = new ResizeObserver(() => applyCanvasZoom(canvasZoom));
+      scaleObserver.observe(viewport);
     }
+
+    // Zoom controls — a sibling of the viewport, not inside it, so they
+    // never scroll with the canvas (see .canvas-zoom-controls in styles.css).
+    const zoomControls = canvasEl.querySelector('.canvas-zoom-controls');
+    if (zoomControls) {
+      zoomControls.addEventListener('click', e => {
+        const btn = e.target.closest('[data-zoom-action]');
+        if (!btn) return;
+        const action = btn.dataset.zoomAction;
+        if (action === 'in')    applyCanvasZoom(canvasZoom + CANVAS_ZOOM_STEP);
+        else if (action === 'out')   applyCanvasZoom(canvasZoom - CANVAS_ZOOM_STEP);
+        else if (action === 'reset') applyCanvasZoom(CANVAS_ZOOM_DEFAULT);
+        else if (action === 'fit')   applyCanvasZoom(1);
+      });
+    }
+    // Ctrl/Cmd+scroll zooms, matching the trackpad-pinch convention Keynote/
+    // Figma/etc use (Chromium reports a trackpad pinch as a wheel event with
+    // ctrlKey set) — preventDefault so it doesn't also scroll the viewport
+    // or (on ctrl+wheel specifically) zoom the whole OS-level page.
+    viewport.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      applyCanvasZoom(canvasZoom - e.deltaY * 0.0015);
+    }, { passive: false });
   }
 
   const removeBtn = canvasEl.querySelector('.canvas-act-remove');
@@ -2195,6 +2326,11 @@ function wireMarqueeSelect(container) {
 // every time renderBlocksLayer (re)builds the block DOM.
 function wireBlockEvents(blockEl, blockId) {
   const stage       = canvasEl.querySelector('.canvas-stage');
+  // The drag clamps below bound against this, not canvasEl (the whole
+  // panel including the header/notes areas) — a block should never be
+  // draggable behind the toolbar or the notes panel, only within the
+  // visible scrollable canvas area itself.
+  const viewport    = canvasEl.querySelector('.canvas-zoom-viewport');
   const zoneHints   = canvasEl.querySelector('.canvas-zone-hints');
   const guideV      = canvasEl.querySelector('.canvas-center-guide-v');
   const guideH      = canvasEl.querySelector('.canvas-center-guide-h');
@@ -2318,8 +2454,13 @@ function wireBlockEvents(blockEl, blockId) {
         // Clamp the delta against the group's *combined* bounding box, not
         // each member independently — independent clamping would let
         // members drift apart from each other once any one hits an edge.
-        deltaX = Math.max(-groupBounds.left, Math.min(deltaX, sr.width  - groupBounds.right));
-        deltaY = Math.max(-groupBounds.top,  Math.min(deltaY, sr.height - groupBounds.bottom));
+        // Bounded against the visible canvas viewport, not the stage — lets
+        // a group be dragged off the slide onto the surrounding margin
+        // while staying fully on-screen and grabbable there, instead of
+        // stopping dead at the slide edge.
+        const rootRect = viewport.getBoundingClientRect();
+        deltaX = Math.max((rootRect.left - sr.left) - groupBounds.left, Math.min(deltaX, (rootRect.right  - sr.left) - groupBounds.right));
+        deltaY = Math.max((rootRect.top  - sr.top)  - groupBounds.top,  Math.min(deltaY, (rootRect.bottom - sr.top)  - groupBounds.bottom));
 
         // Equal-distance guide, keyed to the same held member as the snap
         // above: measured against every block *not* in this drag (all group
@@ -2355,8 +2496,14 @@ function wireBlockEvents(blockEl, blockId) {
 
       let nl = e.clientX - sr.left - offsetX;
       let nt = e.clientY - sr.top  - offsetY;
-      nl = Math.max(0, Math.min(nl, sr.width  - blockEl.offsetWidth));
-      nt = Math.max(0, Math.min(nt, sr.height - blockEl.offsetHeight));
+      // Bounded against the visible canvas viewport, not the stage — lets
+      // a block be dragged fully off the slide onto the surrounding margin
+      // (see .canvas-pasteboard in styles.css) while staying fully
+      // on-screen and grabbable there, instead of stopping dead at the
+      // slide edge.
+      const rootRect = viewport.getBoundingClientRect();
+      nl = Math.max(rootRect.left - sr.left, Math.min(nl, rootRect.right  - sr.left - blockEl.offsetWidth));
+      nt = Math.max(rootRect.top  - sr.top,  Math.min(nt, rootRect.bottom - sr.top  - blockEl.offsetHeight));
 
       // Snap by the box's center point (matching how the final drop and the
       // compiled output both anchor position), then convert back to the
@@ -2437,12 +2584,14 @@ function wireBlockEvents(blockEl, blockId) {
         const moves = memberStarts.map(m => {
           const r = m.el.getBoundingClientRect();
           // Design-relative (see designToStagePositionPct) — this is what
-          // actually gets saved as x/y, so convert before the clamp below,
-          // not after, or the 2/98 bounds wouldn't mean what they say.
+          // actually gets saved as x/y. No bounds clamp here (there used to
+          // be one, to 2/98): the drag itself (onMouseMove above) already
+          // keeps every member within the editor panel, off-slide positions
+          // included, so whatever this measures is exactly where the group
+          // visually landed — clamping again here would just snap an
+          // intentionally off-slide drop back onto the slide.
           let px = stageToDesignPositionPct(((r.left + r.width  / 2 - sr.left) / sr.width)  * 100);
           let py = stageToDesignPositionPct(((r.top  + r.height / 2 - sr.top)  / sr.height) * 100);
-          px = Math.max(2, Math.min(98, px));
-          py = Math.max(2, Math.min(98, py));
           m.el.classList.remove('is-dragging');
           m.el.style.position  = '';
           m.el.style.left      = '';
@@ -2468,12 +2617,14 @@ function wireBlockEvents(blockEl, blockId) {
       const br = blockEl.getBoundingClientRect();
       // Design-relative (see designToStagePositionPct) — this is what
       // actually gets saved as x/y (and what applyDragSnap below compares
-      // against LAYOUT_ZONES' own design-relative ax/ay), so convert before
-      // the clamp, not after, or the 2/98 bounds wouldn't mean what they say.
+      // against LAYOUT_ZONES' own design-relative ax/ay). No bounds clamp
+      // here (there used to be one, to 2/98): the drag itself (onMouseMove
+      // above) already keeps the box within the editor panel, off-slide
+      // positions included, so whatever this measures is exactly where the
+      // box visually landed — clamping again here would just snap an
+      // intentionally off-slide drop back onto the slide.
       let px = stageToDesignPositionPct(((br.left + br.width  / 2 - sr.left) / sr.width)  * 100);
       let py = stageToDesignPositionPct(((br.top  + br.height / 2 - sr.top)  / sr.height) * 100);
-      px = Math.max(2, Math.min(98, px));
-      py = Math.max(2, Math.min(98, py));
 
       blockEl.style.position  = '';
       blockEl.style.left      = '';
