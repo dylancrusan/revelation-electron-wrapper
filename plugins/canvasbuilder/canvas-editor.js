@@ -489,6 +489,18 @@ function applyCanvasZoom(zoom) {
   stage.style.height = (fitWidth * 9 / 16 * canvasZoom) + 'px';
   updateCanvasScale(stage);
   syncPasteboardToStage(stage);
+  // The iframe fills .canvas-stage (width/height:100%), so resizing the
+  // stage above already resizes it too, and reveal.js's own window-resize
+  // listener normally re-runs its layout() on its own — but that's a
+  // passive, best-effort catch, not something this command explicitly
+  // waits on. 'layout' (see the command handler in presentations.js, and
+  // http_admin/builder/preview.js's own layout() for the same pattern on
+  // the ordinary markdown editor's live preview) calls deck.layout()
+  // directly, once now and once again 120ms later, so a resize this
+  // frequent (dragging the zoom slider, or the ResizeObserver below firing
+  // on every panel-resize step) can't leave reveal's own scale calculation
+  // settled on a stale, pre-resize size.
+  sendCanvasCommand('layout');
   const label = canvasEl.querySelector('.canvas-zoom-label');
   if (label) label.textContent = Math.round(canvasZoom * 100) + '%';
   try { localStorage.setItem(CANVAS_ZOOM_STORAGE_KEY, String(canvasZoom)); } catch { /* ignore */ }
