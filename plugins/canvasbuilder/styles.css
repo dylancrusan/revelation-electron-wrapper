@@ -249,6 +249,7 @@
    a forgiving hit target. */
 .canvas-resize-handle {
   position: absolute;
+  box-sizing: border-box;
   width: 8px;
   height: 8px;
   background: #fff;
