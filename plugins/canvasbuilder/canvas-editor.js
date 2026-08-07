@@ -139,7 +139,7 @@ let lastRenderedSlideKey = null;
 // *mutator* that depends on a selection guards against the empty case
 // instead, so an empty selection is inert rather than silently acting on
 // that same block-1 fallback.
-let selectedBlockIds = [1];
+let selectedBlockIds = [];
 let editingBlockId = null;
 // Real, actually-rendered per-block geometry reported by the live preview
 // iframe (see revelation/js/presentations.js's postBlockGeometry) — keyed by
@@ -1459,7 +1459,7 @@ function renderCanvas() {
   if (lastRenderedSlideKey !== null && lastRenderedSlideKey !== slideKey) {
     editingBlockId = null;
     exitEditModeUI();
-    selectedBlockIds = [1];
+    selectedBlockIds = [];
     // A previous slide's measured geometry can't apply to this one (even a
     // matching block id would be a different block) — fall back to the
     // estimate until this slide's own report arrives via navigateCanvas()
