@@ -5,7 +5,7 @@
  * Replaces direct builder-internal access (state, markDirty, topEditorEl, editorEl)
  * with the public BuilderHost API: host.getDocument(), host.getSelection(), host.transact().
  */
-import { bodyToHtml, htmlToBody } from './slide-wysiwyg.js';
+import { bodyToHtml, htmlToBody, bodyToPreviewHtml } from './slide-wysiwyg.js';
 
 const CANVAS_BRIDGE = 'revelation-builder-preview-bridge';
 let canvasBridgeToken = '';
@@ -165,6 +165,16 @@ let measuredGeometryBody = null;
 // gesture's own mouseup already triggers a full render right after clearing
 // this, which picks up whatever's newest in measuredGeometry by then.
 let blockInteractionInProgress = false;
+// Ids resyncPreviewBlocks last sent a live style patch for (i.e. were
+// explicit as of that render) — see resyncPreviewBlocks' own comment for why
+// this is needed. Reset alongside the other per-slide caches above whenever
+// the selected slide changes, since a same-numbered block on a different
+// slide is unrelated.
+let lastExplicitBlockIds = new Set();
+// block id -> content string last sent to the iframe (see
+// resyncPreviewBlockContent) — reset on slide change for the same reason as
+// lastExplicitBlockIds above.
+let lastSyncedBlockContent = new Map();
 
 const LAYOUT_ZONES = [
   { id: 'center',      macro: null,              label: 'Center',       ax: 50, ay: 50 },
@@ -1478,6 +1488,8 @@ function renderCanvas() {
     // below (sends 'slide', which the iframe answers with 'slidechanged' ->
     // postBlockGeometry).
     measuredGeometry = null;
+    lastExplicitBlockIds = new Set();
+    lastSyncedBlockContent = new Map();
   }
   lastRenderedSlideKey = slideKey;
 
@@ -1590,6 +1602,18 @@ function renderCanvas() {
   const removeBtn = canvasEl.querySelector('.canvas-act-remove');
   if (removeBtn) removeBtn.hidden = !bg;
 
+  // Sent before the resync calls below (moveBlock/blockStyle/blockContent
+  // all read deck.getCurrentSlide() on the iframe side) — postMessage
+  // delivery order is preserved for a given target window, so navigating
+  // first guarantees the iframe has already switched slides by the time it
+  // processes those patches. Sending 'slide' *after* them (as this used to)
+  // let a patch meant for the newly-selected slide land on whatever slide
+  // was still active in the iframe, since the iframe hadn't been told to
+  // navigate yet — visibly mixing one slide's freshly-edited text onto
+  // another slide's background until the next unrelated render happened to
+  // paper over it.
+  navigateCanvas();
+
   // measuredGeometry only reflects the body it was measured against —
   // dropped here (not just at mutateCurrentSlide, which only clears it for
   // edits that go through this plugin's own mutators) so it can't outlive
@@ -1613,12 +1637,11 @@ function renderCanvas() {
     selectedBlockIds = selectedBlockIds.filter(id => blocks.some(b => b.id === id));
     renderBlocksLayer(blocks, slide.top);
     resyncPreviewBlocks(blocks);
+    resyncPreviewBlockContent(blocks);
 
     const deleteBlockBtn = canvasEl.querySelector('.canvas-delete-block-btn');
     if (deleteBlockBtn) deleteBlockBtn.hidden = !canDeleteSelectedBlock();
   }
-
-  navigateCanvas();
 }
 
 // Full live-preview resync: sends every explicit block's current style and
@@ -1635,11 +1658,62 @@ function renderCanvas() {
 // this plugin's placeholder defaults on every single slide.
 function resyncPreviewBlocks(blocks) {
   const explicitBlocks = blocks.filter(b => b.explicit);
-  if (!explicitBlocks.length) return;
+  const currentIds = new Set(explicitBlocks.map(b => b.id));
+  // A block that was explicit as of the *last* resync but isn't anymore —
+  // most commonly undo of the drag/style edit that first made it explicit —
+  // still needs a corrective blockStyle command. Otherwise the live inline
+  // patch this same function sent earlier is never cleared (presentations.js's
+  // blockStyle handler only clears it in response to a blockStyle command
+  // for that id), and the iframe keeps showing the stale un-reverted
+  // position/style until a full preview reload. Scoped to ids *we* actually
+  // patched, so a block that's simply never been touched this session still
+  // never gets sent a stomping default style.
+  const revertedIds = [...lastExplicitBlockIds].filter(id => !currentIds.has(id));
+  lastExplicitBlockIds = currentIds;
+  if (!explicitBlocks.length && !revertedIds.length) return;
   explicitBlocks.forEach(block => {
     sendCanvasCommand('blockStyle', { id: block.id, style: block.style });
   });
+  revertedIds.forEach(id => {
+    const block = blocks.find(b => b.id === id);
+    if (block) sendCanvasCommand('blockStyle', { id: block.id, style: block.style });
+  });
   sendCanvasCommand('reorderBlocks', { ids: blocks.map(b => b.id) });
+}
+
+// Live-preview text sync, parallel to resyncPreviewBlocks above but for
+// content instead of style/position. Keynote-style editing shows the new
+// text immediately via the transparent contenteditable overlay (see
+// startEditingBlock/exitEditModeUI's setEditing command) — but that overlay
+// only exists while a block is actively being edited; once it's dismissed,
+// the iframe's own (real, visible) text takes over again, and without this
+// it would still be whatever was last *saved*. Called from renderCanvas() on
+// every render (any document change, including undo/redo of a text edit,
+// not just commitEdit itself) for the same reason resyncPreviewBlocks is —
+// undo/redo goes through the host's own undo-manager and never calls
+// commitEdit directly.
+// Unlike style, this is safe to send for *every* block regardless of
+// explicit-ness: a block's content is never a placeholder guess the way
+// BLOCK_STYLE_DEFAULTS is, so there's nothing to "stomp" by resending it —
+// only diffed against the last-sent value so an untouched block isn't
+// repatched on every unrelated render.
+function resyncPreviewBlockContent(blocks) {
+  const seenIds = new Set();
+  blocks.forEach(block => {
+    seenIds.add(block.id);
+    if (lastSyncedBlockContent.get(block.id) === block.content) return;
+    lastSyncedBlockContent.set(block.id, block.content);
+    // null means bodyToPreviewHtml can't represent this block live (e.g.
+    // it's entirely a macro line, like a bare image) — leave the iframe's
+    // real content alone rather than blanking it out. See that function's
+    // own comment.
+    const html = bodyToPreviewHtml(block.content);
+    if (html === null) return;
+    sendCanvasCommand('blockContent', { id: block.id, html });
+  });
+  for (const id of [...lastSyncedBlockContent.keys()]) {
+    if (!seenIds.has(id)) lastSyncedBlockContent.delete(id);
+  }
 }
 
 // Shared by renderBlocksLayer's freeform and measured-geometry branches —

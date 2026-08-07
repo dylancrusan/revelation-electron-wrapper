@@ -411,4 +411,53 @@ function htmlToBody(html) {
   return lines.join('\n');
 }
 
-export { bodyToHtml, htmlToBody };
+// bodyToHtml, stripped of editor-only artifacts, for injecting into the live
+// preview iframe (see resyncPreviewBlockContent in canvas-editor.js). The
+// macro-chip divs (image/audio/attribution/etc. placeholders) only make
+// sense inside the contenteditable — the real iframe has no way to render
+// what they stand for without the full compiler, so rather than leak the
+// literal chip label ("🖼 background") into the live slide, they're dropped;
+// that macro's real effect still shows up correctly once the edit is saved.
+// The blank-line spacer <p class="slide-wysiwyg-blank-line"> is dropped too —
+// it has no visible counterpart in the compiled slide (bodyToHtml's own
+// comment on it says as much), but only because the *editor's* stylesheet
+// specifically zeroes that class out. The real theme doesn't know it and
+// gives every <p> a solid background pill for readability against a photo
+// background (section[data-darkbg]/[data-lightbg] p in layouts.scss) — left
+// in, an empty one of these paragraphs still rendered as a blank colored bar.
+//
+// A verse-ref line (bodyToHtml's <p class="slide-wysiwyg-verse-ref">, from a
+// whole line wrapped in single underscores) gets its grey/italic look purely
+// from that editor-only class too — the real compiler instead wraps the
+// *inner* text in <cite> before markdown rendering (see
+// convertUnderscoreCites in markdown-compiler.js), and it's that <cite>,
+// not any class on the <p>, that layouts.scss's cite:not(.attrib) rule
+// styles. Reproduced here the same way, so the preview matches Save exactly
+// instead of falling back to an unstyled paragraph.
+//
+// Returns null — not '' — for a block that's *entirely* macro lines (e.g. a
+// block that's just a bare image reference): '' would tell the caller to
+// blank the live block out, wiping real, already-rendered content (that
+// image) the moment this resyncs, for a case this function has no way to
+// represent live at all. null instead means "can't preview this — leave
+// whatever's already there." A block that's genuinely empty text still
+// correctly returns '' via bodyToHtml's own empty-input check below.
+function bodyToPreviewHtml(markdown) {
+  const html = bodyToHtml(markdown);
+  if (!html) return html;
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  const hadContent = temp.childNodes.length > 0;
+  temp.querySelectorAll('.slide-wysiwyg-macro-line, .slide-wysiwyg-blank-line').forEach((el) => el.remove());
+  temp.querySelectorAll('.slide-wysiwyg-verse-ref').forEach((el) => {
+    el.classList.remove('slide-wysiwyg-verse-ref');
+    const cite = document.createElement('cite');
+    cite.innerHTML = el.innerHTML;
+    el.innerHTML = '';
+    el.appendChild(cite);
+  });
+  if (hadContent && !temp.childNodes.length) return null;
+  return temp.innerHTML;
+}
+
+export { bodyToHtml, htmlToBody, bodyToPreviewHtml };

@@ -113,6 +113,26 @@ function canUndo() { return cursor > 0; }
 function canRedo() { return cursor < entries.length - 1; }
 function onHistoryChange(fn) { if (typeof fn === 'function') listeners.push(fn); }
 
+// Keeps the live/tip entry's `selected` following plain slide navigation
+// (no content change involved). Without this, that entry's `selected` stays
+// frozen at wherever the view happened to be the moment it was recorded —
+// for entries[0] specifically, that's always the slide selectSlide(0, 0)
+// left it on right before loadPresentation() calls reset(). Undoing back
+// past the last real edit to that entry would then snap the view to
+// whatever slide that was, regardless of where the user actually navigated
+// to before making their first edit. Guarded off while restoring (undo/redo
+// already drives its own selectSlide) and while an edit is still debouncing
+// (that in-flight edit's own entry hasn't been pushed yet, so the tip still
+// represents "before this edit" and shouldn't adopt a later navigation).
+function syncSelection(h, v) {
+  if (restoring || pendingTimer) return;
+  if (cursor !== entries.length - 1) return;
+  const top = entries[cursor];
+  if (!top) return;
+  if (top.selected.h === h && top.selected.v === v) return;
+  top.selected = { h, v };
+}
+
 addDirtyListener(scheduleCommit);
 
-export { reset, undo, redo, canUndo, canRedo, onHistoryChange };
+export { reset, undo, redo, canUndo, canRedo, onHistoryChange, syncSelection };

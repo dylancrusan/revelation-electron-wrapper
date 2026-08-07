@@ -51,6 +51,7 @@ import {
 import { markDirty, setStatus } from './app-state.js';
 import { schedulePreviewUpdate, updatePreview, cancelPreviewUpdateTimer } from './preview.js';
 import { closeAddContentMenu } from './content.js';
+import { syncSelection as syncHistorySelection } from './history.js';
 
 const slideListDragState = {
   fromV: null,
@@ -409,6 +410,7 @@ function selectSlide(hIndex, vIndex, options = {}) {
   state.selected = { h: hIndex, v: vIndex };
   state.selected.h = safeH;
   state.selected.v = safeV;
+  syncHistorySelection(safeH, safeV);
   const slide = state.stacks[safeH][safeV] || createEmptySlide();
   topEditorEl.value = slide.top || '';
   editorEl.value = slide.body || '';
