@@ -990,16 +990,30 @@ function _buildXcpMenu(onPick) {
   return frag;
 }
 
+// Font names only (no comma-separated fallback stacks): setBlockStyleProp
+// round-trips this value through the block's `<!-- canvas_block_N: ... -->`
+// marker, whose key=val pairs split on unparenthesized commas (see
+// splitStyleArgs in canvas-editor.js and splitCanvasBlockArgs in
+// markdown-compiler.js) — a stack like "Helvetica, Arial, sans-serif" would
+// get sliced apart into bogus extra pairs. A bare name (quoted or not, CSS
+// accepts multi-word font-family idents unquoted) is exactly what Keynote's
+// own font picker stores too, so this matches that behavior: no fallback
+// chain, just the one family, same as a user picking a font that turns out
+// not to be installed.
+// The first 5 are this app's own bundled webfonts (always available offline
+// — see revelation_dark.scss/revelation_light.scss's font imports); the
+// rest are common cross-platform system fonts.
+const CANVAS_TEXT_FONTS = [
+  'Inter', 'Source Sans Pro', 'Noto Serif', 'JetBrains Mono', 'League Gothic',
+  'Georgia', 'Times New Roman', 'Helvetica', 'Arial', 'Verdana',
+  'Trebuchet MS', 'Courier New', 'Palatino', 'Impact'
+];
+
 function _populateFontSelect(sel) {
-  // If the builder has a global font list available, use it
-  try {
-    const fonts = window.__revBuilderState?.fonts || window.__revFontList || [];
-    if (!fonts.length) return;
-    fonts.forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.id || f.name || f;
-      opt.textContent = f.name || f;
-      sel.appendChild(opt);
-    });
-  } catch (e) { /* ignore */ }
+  CANVAS_TEXT_FONTS.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
 }
