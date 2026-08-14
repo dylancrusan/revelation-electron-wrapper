@@ -475,12 +475,17 @@
 .canvas-pasteboard .canvas-text-editor h4,
 .canvas-pasteboard .canvas-text-editor h5,
 .canvas-pasteboard .canvas-text-editor h6 { margin: 4px 0; font-weight: 700; line-height: 1.3; color: #fff; font-family: inherit; }
-.canvas-pasteboard .canvas-text-editor h1 { font-size: 2.2em; }
-.canvas-pasteboard .canvas-text-editor h2 { font-size: 1.5em; }
-.canvas-pasteboard .canvas-text-editor h3 { font-size: 1.1em; }
-.canvas-pasteboard .canvas-text-editor h4 { font-size: 1em; }
-.canvas-pasteboard .canvas-text-editor h5 { font-size: 0.9em; }
-.canvas-pasteboard .canvas-text-editor h6 { font-size: 0.8em; }
+/* Matches .canvas-h1..h6 above exactly (real-theme-calibrated, see that
+   block's own comment) — these used to be stale pre-calibration values of
+   their own (h1 2.2em, h2 1.5em, h3 1.1em, h4 1em, h5 0.9em, h6 0.8em),
+   which visibly shrank/reflowed heading text the instant you entered edit
+   mode. */
+.canvas-pasteboard .canvas-text-editor h1 { font-size: 2.8em; }
+.canvas-pasteboard .canvas-text-editor h2 { font-size: 2.4em; }
+.canvas-pasteboard .canvas-text-editor h3 { font-size: 2.2em; }
+.canvas-pasteboard .canvas-text-editor h4 { font-size: 2em; }
+.canvas-pasteboard .canvas-text-editor h5 { font-size: 1.6em; }
+.canvas-pasteboard .canvas-text-editor h6 { font-size: 0.67em; }
 .canvas-pasteboard .canvas-text-editor p  { margin: 2px 0; font-size: 0.85em; }
 /* bodyToHtml (slide-wysiwyg.js) turns every blank line between markdown
    paragraphs into its own <p class="slide-wysiwyg-blank-line"><br></p> so
