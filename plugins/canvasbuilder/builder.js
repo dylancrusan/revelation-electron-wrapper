@@ -24,7 +24,8 @@ import {
   groupBlocks,
   ungroupSelectedBlocks,
   distributeBlocks,
-  setBlockSize
+  setBlockSize,
+  attachSmartDashes
 } from './canvas-editor.js';
 import { renderNotes } from './notes-preview.js';
 
@@ -632,6 +633,7 @@ export function getBuilderExtensions(ctx = {}) {
     loadFromMarkdown();
 
     notesRendered.addEventListener('input', syncToMarkdown);
+    attachSmartDashes(notesRendered);
 
     notesRendered.addEventListener('paste', e => {
       e.preventDefault();

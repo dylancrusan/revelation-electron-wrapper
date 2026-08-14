@@ -2232,6 +2232,50 @@ function setBlockPositionsAndSizes(entries) { // [{id, x, y, width, height}]
   renderCanvas(); // resyncs the live preview itself — see resyncPreviewBlocks
 }
 
+// Live "--" -> "–" / "---" -> "—" conversion for contenteditable text editors:
+// this canvas block editor, and (via export) the presenter-notes editor in
+// builder.js. Fires as-you-type because neither editor holds raw markdown
+// source the way the render-time smart-quotes pass (revelation/js/smart-quotes.js)
+// does — there's no standalone "---" line here for a third hyphen to collide
+// with (that's only meaningful in the slide-body/notes markdown as a whole,
+// a different processing stage these keystroke-level editors don't touch).
+function attachSmartDashes(editorEl) {
+  editorEl.addEventListener('input', e => {
+    if (e.inputType !== 'insertText' || e.data !== '-') return;
+    const sel = window.getSelection();
+    if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE || !editorEl.contains(node)) return;
+    // Skip inside inline code, where "--" (e.g. a CLI flag) means what it says.
+    if (node.parentElement && node.parentElement.closest('code')) return;
+
+    const offset = range.startOffset;
+    const text = node.textContent;
+    if (offset < 2) return;
+
+    let start, replacement;
+    if (text[offset - 2] === '–' && text[offset - 1] === '-') {
+      // A third hyphen right after an already-converted en dash -> em dash.
+      start = offset - 2;
+      replacement = '—';
+    } else if (text.slice(offset - 2, offset) === '--') {
+      // Two hyphens in a row -> en dash.
+      start = offset - 2;
+      replacement = '–';
+    } else {
+      return;
+    }
+
+    const target = document.createRange();
+    target.setStart(node, start);
+    target.setEnd(node, offset);
+    sel.removeAllRanges();
+    sel.addRange(target);
+    document.execCommand('insertText', false, replacement);
+  });
+}
+
 // Wiring that only ever applies once to the shared, non-repeating parts of
 // the canvas: the edit/save button, background/tint/remove-bg buttons, the
 // add/delete block buttons, and the shared contenteditable editor's keyboard
@@ -2303,6 +2347,8 @@ function wireStaticEvents(container) {
         renderCanvas();
       }
     });
+
+    attachSmartDashes(textarea);
 
     // Keynote-style click-away: while a block is being edited, any mousedown
     // outside the editor itself (and outside the two buttons that already
@@ -2969,5 +3015,5 @@ export {
   getSelectedBlockId, getSelectedBlockIds, addTextBlock, deleteSelectedBlock, canDeleteSelectedBlock,
   setBlockPositionFields, getResolvedBlockPosition, getStyleForBlockId,
   bringToFront, sendToBack, bringForward, sendBackward,
-  groupBlocks, ungroupSelectedBlocks, distributeBlocks, setBlockSize
+  groupBlocks, ungroupSelectedBlocks, distributeBlocks, setBlockSize, attachSmartDashes
 };
