@@ -232,6 +232,19 @@ function resolveThumbBlockPosition(block, top) {
 
 function thumbStripInline(s) {
   return s
+    // Raw HTML an author embedded directly in the source (e.g. the
+    // <span style="font-size:0.7em"> trick used to shrink a long heading —
+    // see canvasbuilder/slide-wysiwyg.js's inlineMarkdownToHtml for the
+    // real-compiler-facing equivalent) has no meaning as a plain-text
+    // overlay label, and el.textContent below never parses it anyway — so
+    // strip the tags but keep their inner text rather than showing the
+    // literal "<span...>" markup.
+    .replace(/<[^>]+>/g, '')
+    // A trailing "++" (or "++:preset:options") is the real compiler's
+    // fragment marker (markdown-compiler.js's fallback path) — it hides the
+    // text entirely until advanced, so the truest small-label rendering is
+    // just to drop the marker rather than show it as literal characters.
+    .replace(/\s*\+\+(?::[a-zA-Z0-9:]+)?\s*$/, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
     .replace(/_([^_\n]+)_/g, '$1')
@@ -281,6 +294,9 @@ function thumbContentLinesFor(rawBody) {
     if (/^<!--/.test(trimmed)) continue;
     if (/^!\[/.test(trimmed)) continue;
     if (/^:\w.*:\s*$/.test(trimmed)) continue;
+    // A line that's only a fragment marker (canvasbuilder/slide-wysiwyg.js's
+    // isSlideBodyMacro treats this the same way) — nothing to show.
+    if (/^\+\+(?::[a-zA-Z0-9:]+)?\s*$/.test(trimmed)) continue;
     contentLines.push(trimmed);
   }
   return contentLines;

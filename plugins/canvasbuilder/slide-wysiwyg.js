@@ -129,6 +129,45 @@ function inlineMarkdownToHtml(text) {
   return template.innerHTML;
 }
 
+// Matches the real compiler's end-of-line fragment marker exactly (see
+// markdown-compiler.js's fallback path, "++" or "++:preset:options...", used
+// for both list items and paragraph-final lines). Capturing this precisely —
+// not just a loose "ends with ++" check — keeps the editor's idea of "this is
+// a fragment" identical to what the live compile will actually do with it.
+const TRAILING_FRAGMENT_RE = /\s*(\+\+(?::[a-zA-Z0-9:]+)?)$/;
+
+// Strip a trailing fragment marker from a line's raw markdown text, if
+// present. The compiled slide hides fragment content entirely until
+// advanced (markdown-compiler.js:779-781); showing literal "++" characters
+// in the editor is neither that hidden state nor the real revealed text, so
+// bodyToHtml instead renders a small non-editable badge in its place (see
+// withFragmentBadge) — closer to the truth without hiding text the author
+// still needs to be able to read and edit.
+function stripTrailingFragment(text) {
+  const match = text.match(TRAILING_FRAGMENT_RE);
+  if (!match) return { text, marker: null };
+  return { text: text.slice(0, match.index), marker: match[1] };
+}
+
+// Non-editable "this text is a fragment" indicator, styled to match the
+// existing whole-line macro chip (.slide-wysiwyg-macro) so the two read as
+// the same design language. The exact marker (including any :preset:options)
+// is preserved on the element so htmlToBody can restore it byte-for-byte.
+function fragmentBadgeHtml(marker) {
+  const escaped = marker.replace(/"/g, '&quot;');
+  return ` <span class="slide-wysiwyg-fragment-badge" data-fragment-marker="${escaped}" contenteditable="false" title="Appears on click">⋯</span>`;
+}
+
+// Convert one line's markdown to HTML, converting a trailing fragment marker
+// (if present) into the badge above instead of leaving "++" as raw editable
+// text. Use in place of inlineMarkdownToHtml anywhere a fragment marker is
+// meaningful (headings, list items, the last line of a paragraph).
+function withFragmentBadge(rawText) {
+  const { text, marker } = stripTrailingFragment(rawText);
+  const html = inlineMarkdownToHtml(text);
+  return marker ? html + fragmentBadgeHtml(marker) : html;
+}
+
 // Walk a DOM node tree and convert to markdown, preserving styled <span> as HTML.
 function nodeToMarkdown(node) {
   let result = '';
@@ -140,7 +179,12 @@ function nodeToMarkdown(node) {
     if (child.nodeType !== Node.ELEMENT_NODE) continue;
     const tag = child.tagName.toLowerCase();
     const inner = nodeToMarkdown(child);
-    if (tag === 'strong' || tag === 'b') {
+    if (tag === 'span' && child.classList.contains('slide-wysiwyg-fragment-badge')) {
+      // Restore the exact marker this badge stands in for (see
+      // withFragmentBadge) — must be checked before the generic <span>
+      // branch below, or this would save as literal "⋯" text instead.
+      result += ` ${child.dataset.fragmentMarker || '++'}`;
+    } else if (tag === 'strong' || tag === 'b') {
       result += `**${inner}**`;
     } else if (tag === 'em' || tag === 'i') {
       result += `*${inner}*`;
@@ -205,7 +249,11 @@ function bodyToHtml(markdown) {
   const flushList = () => {
     if (!listType || !listItems.length) return;
     const tag = listType;
-    const items = listItems.map((item) => `<li>${inlineMarkdownToHtml(item)}</li>`).join('');
+    // Each list item is its own line in the source (bodyToHtml's per-line
+    // loop below), so a trailing "++" on any one of them is that item's own
+    // fragment marker — matches the real compiler treating each list line
+    // independently (markdown-compiler.js:770's isListItem check).
+    const items = listItems.map((item) => `<li>${withFragmentBadge(item)}</li>`).join('');
     blocks.push(`<${tag}>${items}</${tag}>`);
     listType = null;
     listItems = [];
@@ -222,7 +270,14 @@ function bodyToHtml(markdown) {
     if (!paragraphLines) return;
     // Joined with a space, matching how the real renderer displays a
     // CommonMark soft line break (rendered whitespace, not a forced <br>).
-    const inner = paragraphLines.map((l) => inlineMarkdownToHtml(l)).join(' ');
+    // Only the last source line can carry a fragment marker — the real
+    // compiler only treats "++" as a fragment when it's the last line before
+    // a blank line/EOF (markdown-compiler.js:772's isEndOfParagraph check),
+    // so an earlier soft-wrapped line ending in "++" is just literal text.
+    const lastIndex = paragraphLines.length - 1;
+    const inner = paragraphLines
+      .map((l, i) => (i === lastIndex ? withFragmentBadge(l) : inlineMarkdownToHtml(l)))
+      .join(' ');
     blocks.push(`<p>${inner}</p>`);
     paragraphLines = null;
   };
@@ -266,22 +321,22 @@ function bodyToHtml(markdown) {
     flushQuote();
 
     const h6 = trimmed.match(/^###### (.+)$/);
-    if (h6) { flushList(); flushParagraph(); blocks.push(`<h6>${inlineMarkdownToHtml(h6[1])}</h6>`); continue; }
+    if (h6) { flushList(); flushParagraph(); blocks.push(`<h6>${withFragmentBadge(h6[1])}</h6>`); continue; }
 
     const h5 = trimmed.match(/^##### (.+)$/);
-    if (h5) { flushList(); flushParagraph(); blocks.push(`<h5>${inlineMarkdownToHtml(h5[1])}</h5>`); continue; }
+    if (h5) { flushList(); flushParagraph(); blocks.push(`<h5>${withFragmentBadge(h5[1])}</h5>`); continue; }
 
     const h4 = trimmed.match(/^#### (.+)$/);
-    if (h4) { flushList(); flushParagraph(); blocks.push(`<h4>${inlineMarkdownToHtml(h4[1])}</h4>`); continue; }
+    if (h4) { flushList(); flushParagraph(); blocks.push(`<h4>${withFragmentBadge(h4[1])}</h4>`); continue; }
 
     const h3 = trimmed.match(/^### (.+)$/);
-    if (h3) { flushList(); flushParagraph(); blocks.push(`<h3>${inlineMarkdownToHtml(h3[1])}</h3>`); continue; }
+    if (h3) { flushList(); flushParagraph(); blocks.push(`<h3>${withFragmentBadge(h3[1])}</h3>`); continue; }
 
     const h2 = trimmed.match(/^## (.+)$/);
-    if (h2) { flushList(); flushParagraph(); blocks.push(`<h2>${inlineMarkdownToHtml(h2[1])}</h2>`); continue; }
+    if (h2) { flushList(); flushParagraph(); blocks.push(`<h2>${withFragmentBadge(h2[1])}</h2>`); continue; }
 
     const h1 = trimmed.match(/^# (.+)$/);
-    if (h1) { flushList(); flushParagraph(); blocks.push(`<h1>${inlineMarkdownToHtml(h1[1])}</h1>`); continue; }
+    if (h1) { flushList(); flushParagraph(); blocks.push(`<h1>${withFragmentBadge(h1[1])}</h1>`); continue; }
 
     const bullet = trimmed.match(/^- (.*)$/);
     if (bullet) {
