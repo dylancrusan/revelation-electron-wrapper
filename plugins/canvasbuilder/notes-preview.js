@@ -4,8 +4,18 @@
  */
 
 function inlineMarkdown(text) {
-  // Color spans {#rrggbb:text} or {#rgb:text}
-  text = text.replace(/\{(#[0-9a-fA-F]{3,6}):([^}]+)\}/g, '<span style="color:$1">$2</span>');
+  // Bold+italic combined (***text***) has to be handled as its own case,
+  // and before every pass below — each of those excludes "<"/">" from what
+  // it'll match as content, specifically so it doesn't corrupt a tag an
+  // earlier pass already inserted. That's exactly why color used to run
+  // first: the moment {#hex:text} became a real <span>, the "***" wrapping
+  // it (e.g. from text that's bold+italic+colored all at once) could no
+  // longer match across the tag it had just inserted, leaving orphaned
+  // literal asterisks that then paired up unpredictably with other
+  // asterisks later in the line. Matching *** up front, before anything has
+  // inserted a single tag, sidesteps that failure mode entirely for the
+  // common case of a colored word that's also bold+italic.
+  text = text.replace(/\*\*\*([^*<>]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   // Bold (** or __)
   text = text.replace(/\*\*([^*<>]+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/__([^_<>]+?)__/g, '<strong>$1</strong>');
@@ -18,6 +28,11 @@ function inlineMarkdown(text) {
   text = text.replace(/`([^`<>]+?)`/g, '<code>$1</code>');
   // Links [text](url)
   text = text.replace(/\[([^\]<>]+?)\]\(([^)<>]+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Color spans {#rrggbb:text} or {#rgb:text} — now last, so it can still
+  // find and wrap a macro nested inside a bold/italic run from any pass
+  // above (none of those exclude "{"/"}"), without being the thing that
+  // blocks those passes from matching in the first place.
+  text = text.replace(/\{(#[0-9a-fA-F]{3,6}):([^}]+)\}/g, '<span style="color:$1">$2</span>');
   return text;
 }
 
