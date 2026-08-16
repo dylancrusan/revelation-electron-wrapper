@@ -2355,6 +2355,17 @@ function wireStaticEvents(container) {
     // handle their own exit) commits the edit, same as clicking Save Text.
     // Without this, clicking anywhere else was simply inert, since every
     // other block's own mousedown handler bails out while textarea is open.
+    //
+    // The inspector's text-color menu (#insp-color-menu) is also exempted:
+    // it needs the in-progress selection inside the editor to still be there
+    // and the editor to still be visible when its own click handler runs
+    // (builder.js), so it can color just the highlighted words via
+    // execCommand('foreColor', ...) instead of the whole block. Without this
+    // exemption, this same mousedown (bubbling here after the color menu's
+    // own listener already ran) commits the edit and hides the editor first
+    // — by the time the swatch's click fires, its "is the editor still
+    // visible" guard fails and it silently falls back to recoloring the
+    // whole block instead, even though the user had specific words selected.
     document.addEventListener('mousedown', e => {
       if (editingBlockId === null) return;
       if (textarea.hidden) return;
@@ -2362,6 +2373,8 @@ function wireStaticEvents(container) {
       if (editBtn.contains(e.target)) return;
       const splitBtn = canvasEl.querySelector('.canvas-split-line-btn');
       if (splitBtn && splitBtn.contains(e.target)) return;
+      const colorMenu = document.getElementById('insp-color-menu');
+      if (colorMenu && colorMenu.contains(e.target)) return;
       commitEdit(textarea);
     });
   }

@@ -51,6 +51,7 @@ export function getBuilderExtensions(ctx = {}) {
 
   // Shared state for context-aware inspector color picker and list buttons
   let _notesSelRange          = null;
+  let _canvasTextSelRange     = null;
   let _bulletSelRange         = null;
   let _numberSelRange         = null;
   let _syncNotes              = null;
@@ -391,19 +392,29 @@ export function getBuilderExtensions(ctx = {}) {
   // Color — xcp palette, always visible inline, context-aware (canvas text or notes text)
   const colorMenu = document.getElementById('insp-color-menu');
   if (colorMenu) {
-    // Capture any active notes selection before a swatch click steals focus
+    // Capture any active notes or canvas-text-box selection before a swatch
+    // click steals focus. The two are mutually exclusive per mousedown (a
+    // selection can only live in one contenteditable at a time), so only one
+    // of _notesSelRange/_canvasTextSelRange is ever non-null after this runs.
     colorMenu.addEventListener('mousedown', () => {
       const notesEl = document.getElementById('notes-rendered');
+      const canvasTextEl = document.querySelector('.canvas-text-editor');
       const sel = window.getSelection();
       if (notesEl && sel && sel.rangeCount > 0 && notesEl.contains(sel.anchorNode)) {
         _notesSelRange = sel.getRangeAt(0).cloneRange();
+        _canvasTextSelRange = null;
+      } else if (canvasTextEl && !canvasTextEl.hidden && sel && sel.rangeCount > 0 && canvasTextEl.contains(sel.anchorNode)) {
+        _canvasTextSelRange = sel.getRangeAt(0).cloneRange();
+        _notesSelRange = null;
       } else {
         _notesSelRange = null;
+        _canvasTextSelRange = null;
       }
     });
 
     colorMenu.appendChild(_buildXcpMenu(hex => {
       const notesEl = document.getElementById('notes-rendered');
+      const canvasTextEl = document.querySelector('.canvas-text-editor');
       if (_notesSelRange && notesEl && _syncNotes) {
         notesEl.focus();
         const sel = window.getSelection();
@@ -411,11 +422,32 @@ export function getBuilderExtensions(ctx = {}) {
         sel.addRange(_notesSelRange);
         if (!sel.isCollapsed) {
           if (hex === null) {
-            _stripSelectionColor();
+            _stripSelectionColor(notesEl);
             _syncNotes();
           } else {
             document.execCommand('foreColor', false, hex);
             _syncNotes();
+          }
+        }
+      } else if (_canvasTextSelRange && canvasTextEl && !canvasTextEl.hidden) {
+        // Same execCommand-on-a-restored-Range approach as notes above, just
+        // targeting the active canvas text box instead. No explicit save-back
+        // to the block's markdown is needed here: .canvas-text-editor IS the
+        // live editable surface (not a separate preview like notes-rendered
+        // is), so the color change is already live the moment execCommand
+        // runs, and commitEdit (canvas-editor.js) reads this same innerHTML
+        // fresh via htmlToBody whenever the edit is saved — same path a
+        // manually-typed <span style="color:..."> already round-trips
+        // through (nodeToMarkdown's span case).
+        canvasTextEl.focus();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_canvasTextSelRange);
+        if (!sel.isCollapsed) {
+          if (hex === null) {
+            _stripSelectionColor(canvasTextEl);
+          } else {
+            document.execCommand('foreColor', false, hex);
           }
         }
       } else {
@@ -895,7 +927,7 @@ function _hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function _stripSelectionColor() {
+function _stripSelectionColor(container) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   if (sel.isCollapsed) return;
@@ -906,7 +938,6 @@ function _stripSelectionColor() {
   const SENTINEL = '#010203';
   document.execCommand('foreColor', false, SENTINEL);
 
-  const container = document.getElementById('notes-rendered');
   if (!container) return;
   container.querySelectorAll('font, span').forEach(el => {
     const raw = (el.tagName === 'FONT' ? el.getAttribute('color') : null)
